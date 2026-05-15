@@ -293,8 +293,14 @@
                                 <span>Edit</span>
                             </button>
                             <!-- NEW FEATURE: The Push/PR button uses an inline onclick handler to bypass event-binding lifecycle issues -->
-                            <button class="btn btn-action" id="btn-pr" title="Push to Git / Raise PR" onclick="if(typeof state !== 'undefined' && state.activeScript) raisePRFlow(state.activeScript);">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                            <button class="btn btn-action" id="btn-pr" title="Push to Git / Raise PR"
+                                onclick="if(typeof state !== 'undefined' && state.activeScript) raisePRFlow(state.activeScript);">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="m22 2-7 20-4-9-9-4Z" />
+                                    <path d="M22 2 11 13" />
+                                </svg>
                                 <span>Push / PR</span>
                             </button>
                             <button class="btn btn-action btn-danger" id="btn-delete" title="Delete Script">
@@ -531,7 +537,8 @@ echo 'Hello World'"></textarea>
                 </button>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom: 16px; color: var(--text-muted); font-size: 13px;">Specify the branch, commit message, and optional target repository for your contribution.</p>
+                <p style="margin-bottom: 16px; color: var(--text-muted); font-size: 13px;">Specify the branch, commit
+                    message, and optional target repository for your contribution.</p>
                 <div class="form-group">
                     <label for="pr-repo">Target Repository URL (Optional)</label>
                     <input type="text" id="pr-repo" placeholder="Leave empty to use default 'origin'">
@@ -548,7 +555,11 @@ echo 'Hello World'"></textarea>
             <div class="modal-footer">
                 <button class="btn btn-cancel" id="pr-modal-cancel">Cancel</button>
                 <button class="btn btn-save" id="pr-modal-submit">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m22 2-7 20-4-9-9-4Z" />
+                        <path d="M22 2 11 13" />
+                    </svg>
                     Push / PR
                 </button>
             </div>
@@ -645,13 +656,15 @@ echo 'Hello World'"></textarea>
                         <path d="M12 8h.01" />
                     </svg>
                 </span>
-                <span>Debugger console ready. Capturing logs, errors, and network activity. Type expressions below or use smart suggestions.</span>
+                <span>Debugger console ready. Capturing logs, errors, and network activity. Type expressions below or
+                    use smart suggestions.</span>
             </div>
         </div>
         <div class="debugger-input-area">
             <span class="debugger-input-prompt">›</span>
             <div class="debugger-input-wrapper">
-                <input type="text" id="debugger-input" placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
+                <input type="text" id="debugger-input"
+                    placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
                     autocomplete="off" spellcheck="false">
                 <div class="debugger-suggestions" id="debugger-suggestions"></div>
             </div>
@@ -666,6 +679,9 @@ echo 'Hello World'"></textarea>
     </div>
 
     <script src="app.js?v=4"></script>
+
+    <div id="notification-container" aria-live="polite" aria-atomic="true"></div>
+
 </body>
 
 </html>
