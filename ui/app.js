@@ -560,6 +560,8 @@ function addTerminal() {
 
     const bodyContainer = document.createElement('div');
     bodyContainer.className = 'cli-body';
+    bodyContainer.setAttribute('role', 'log');
+    bodyContainer.setAttribute('aria-live', 'polite');
     bodyContainer.id = `terminal-body-${id}`;
     bodyContainer.style.display = 'none';
     bodyContainer.innerHTML = '<div class="cli-welcome"><span class="cli-prompt">$</span> <span class="cli-welcome-text">Terminal ready.</span></div>';

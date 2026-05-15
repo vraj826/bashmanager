@@ -35,7 +35,7 @@
                     <circle cx="11" cy="11" r="8" />
                     <path d="m21 21-4.3-4.3" />
                 </svg>
-                <input type="text" id="search-input" placeholder="Search scripts... (Ctrl+K)" autocomplete="off">
+                <input type="text" id="search-input" aria-label="Search scripts" placeholder="Search scripts... (Ctrl+K)" autocomplete="off">
                 <kbd class="search-kbd">Ctrl+K</kbd>
             </div>
         </div>
@@ -158,7 +158,7 @@
                                 <circle cx="11" cy="11" r="8"></circle>
                                 <path d="m21 21-4.3-4.3"></path>
                             </svg>
-                            <input type="text" id="cli-search-input" placeholder="Find... (Ctrl+F)" autocomplete="off">
+                            <input type="text" id="cli-search-input" aria-label="Search terminal output" placeholder="Find... (Ctrl+F)" autocomplete="off">
                             <span id="cli-search-results"></span>
                         </div>
                         <span class="run-status" id="run-status"></span>
@@ -172,7 +172,7 @@
                         </button>
                     </div>
                 </div>
-                <div class="cli-body" id="terminal-body">
+                <div class="cli-body" id="terminal-body" role="log" aria-live="polite">
                     <div class="cli-welcome">
                         <span class="cli-prompt">$</span> <span class="cli-welcome-text">Welcome to DevShell. Select a
                             script to run, or type a command below.</span>
@@ -180,8 +180,7 @@
                 </div>
                 <div class="cli-input-bar">
                     <span class="cli-prompt-input">$</span>
-                    <input type="text" id="cli-input" placeholder="Type a command and press Enter..." autocomplete="off"
-                        spellcheck="false">
+                    <input type="text" id="cli-input" aria-label="Terminal command input" placeholder="Type a command and press Enter..." autocomplete="off" spellcheck="false">
                     <button class="btn btn-run-cmd" id="btn-run-cmd" title="Execute" aria-label="Execute command">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -424,7 +423,7 @@
 
     <!-- ─── Add/Edit Modal ─────────────────────────────── -->
     <div class="modal-overlay" id="modal-overlay">
-        <div class="modal" id="script-modal">
+        <div class="modal" id="script-modal" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <h2 id="modal-title">New Script</h2>
                 <button class="btn-icon" id="modal-close" aria-label="Close modal">
@@ -472,7 +471,7 @@ echo 'Hello World'"></textarea>
     </div>
 
     <div class="modal-overlay" id="github-modal-overlay">
-        <div class="modal" id="github-modal">
+        <div class="modal" id="github-modal" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <h2>Import from GitHub</h2>
                 <button class="btn-icon" id="github-modal-close" aria-label="Close GitHub import modal">
@@ -516,7 +515,7 @@ echo 'Hello World'"></textarea>
 
     <!-- NEW FEATURE: PR Modal -> Replaces native browser prompt() to avoid aggressive blocking -->
     <div class="modal-overlay" id="pr-modal-overlay">
-        <div class="modal" id="pr-modal" style="width: 400px;">
+        <div class="modal" id="pr-modal" role="dialog" aria-modal="true" style="width: 400px;">
             <div class="modal-header">
                 <h2>Raise Pull Request</h2>
                 <button class="btn-icon" id="pr-modal-close" aria-label="Close pull request modal">
@@ -554,7 +553,7 @@ echo 'Hello World'"></textarea>
 
     <!-- Lock Management Modal -->
     <div class="modal-overlay" id="lock-modal-overlay">
-        <div class="modal" id="lock-modal" style="width: 400px;">
+        <div class="modal" id="lock-modal" role="dialog" aria-modal="true" style="width: 400px;">
             <div class="modal-header">
                 <h2>Manage Layout Lock</h2>
                 <button class="btn-icon" id="lock-modal-close" aria-label="Close lock settings modal">
@@ -648,7 +647,7 @@ echo 'Hello World'"></textarea>
         <div class="debugger-input-area">
             <span class="debugger-input-prompt">›</span>
             <div class="debugger-input-wrapper">
-                <input type="text" id="debugger-input" placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
+                <input type="text" id="debugger-input" aria-label="Debugger console input" placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
                     autocomplete="off" spellcheck="false">
                 <div class="debugger-suggestions" id="debugger-suggestions"></div>
             </div>
