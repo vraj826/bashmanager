@@ -1836,7 +1836,7 @@ body.debugger-open #app-main {
     height: calc(100vh - var(--header-height) - var(--debugger-height, 280px));
 }
 
-/* ─── Animations ──────────────────────────────────────── */
+/* ─── Animations ─────────────────────────────────────── */
 @keyframes fadeIn {
     from {
         opacity: 0;
