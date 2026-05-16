@@ -570,12 +570,14 @@ function addTerminal() {
             <span class="dot dot-green"></span>
         </span>
         <span>Terminal ${id}</span> 
-        <button class="cli-tab-close" title="Close" onclick="event.stopPropagation(); closeTerminal(${id})"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>`;
+        <button class="cli-tab-close" title="Close" aria-label="Close terminal" onclick="event.stopPropagation(); closeTerminal(${id})"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>`;
     tabBtn.onclick = () => switchTerminal(id);
     tabsContainer.insertBefore(tabBtn, document.getElementById('btn-add-tab'));
 
     const bodyContainer = document.createElement('div');
     bodyContainer.className = 'cli-body';
+    bodyContainer.setAttribute('role', 'log');
+    bodyContainer.setAttribute('aria-live', 'polite');
     bodyContainer.id = `terminal-body-${id}`;
     bodyContainer.style.display = 'none';
     bodyContainer.innerHTML = '<div class="cli-welcome"><span class="cli-prompt">$</span> <span class="cli-welcome-text">Terminal ready.</span></div>';
@@ -705,7 +707,7 @@ function renderSidebar() {
         const isExpanded = state.expandedCategories.has(cat) || !!query;
 
         html += `
-            <div class="category" data-category="${cat}">
+            <div class="category-header" role="button" tabindex="0" aria-expanded="${isExpanded}" onclick="toggleCategory('${cat}')" onkeydown="handleKeyboardAction(event, () => toggleCategory('${cat}'))">
                 <div class="category-header" onclick="toggleCategory('${cat}')">
                     <span class="category-arrow ${isExpanded ? 'expanded' : ''}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
@@ -719,8 +721,9 @@ function renderSidebar() {
             let lockIcon = s.locked ? `<span class="script-item-icon" style="color: var(--accent-orange); margin-right: 4px;">${ICONS.lock}</span>` : '';
 
             return `
-                        <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}"
+                        <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}" role="button" tabindex="0"
                             onclick="selectScript('${s.relative_path}')"
+                            onkeydown="handleKeyboardAction(event, () => selectScript('${s.relative_path}'))"
                             title="${escapeAttr(s.desc)}">
                             ${lockIcon}
                             <span class="script-item-icon" style="${s.locked ? 'display:none;' : ''}">${ICONS.script}</span>
@@ -745,8 +748,9 @@ function renderSidebar() {
     if (favScripts.length > 0) {
         favsSection.style.display = '';
         favsList.innerHTML = favScripts.map(s => `
-            <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}"
-                onclick="selectScript('${s.relative_path}')">
+            <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}" role="button" tabindex="0"
+                onclick="selectScript('${s.relative_path}')"
+                onkeydown="handleKeyboardAction(event, () => selectScript('${s.relative_path}'))">
                 <span class="script-item-icon" style="color: var(--accent-yellow); stroke: var(--accent-yellow);">${ICONS.favorite}</span>
                 <span class="script-item-name">${escapeHtml(s.name)}</span>
             </li>
@@ -927,6 +931,13 @@ function toggleCategory(cat) {
     if (state.expandedCategories.has(cat)) state.expandedCategories.delete(cat);
     else state.expandedCategories.add(cat);
     renderSidebar();
+}
+
+function handleKeyboardAction(event, callback) {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        callback();
+    }
 }
 
 // ─── Modals ─────────────────────────────────────────────

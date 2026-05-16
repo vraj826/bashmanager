@@ -35,12 +35,12 @@
                     <circle cx="11" cy="11" r="8" />
                     <path d="m21 21-4.3-4.3" />
                 </svg>
-                <input type="text" id="search-input" placeholder="Search scripts... (Ctrl+K)" autocomplete="off">
+                <input type="text" id="search-input" aria-label="Search scripts" placeholder="Search scripts... (Ctrl+K)" autocomplete="off">
                 <kbd class="search-kbd">Ctrl+K</kbd>
             </div>
         </div>
         <div class="header-right">
-            <button class="btn-icon" id="btn-debugger-toggle" title="Toggle Debugger Console (Ctrl+`)">
+            <button class="btn-icon" id="btn-debugger-toggle" title="Toggle Debugger Console (Ctrl+`)" aria-label="Toggle debugger console">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="m8 2 1.88 1.88" />
@@ -56,7 +56,7 @@
                     <path d="M17.2 17c2.1.1 3.8 1.9 3.8 4" />
                 </svg>
             </button>
-            <button class="btn-icon" id="btn-refresh" title="Refresh Scripts">
+            <button class="btn-icon" id="btn-refresh" title="Refresh Scripts" aria-label="Refresh scripts">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
@@ -80,8 +80,7 @@
                                 d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
                         </svg>
                         <h2>Scripts</h2>
-                        <button class="btn-icon btn-add-script-small" id="btn-add-script" title="Add New Script"
-                            style="width: 20px; height: 20px; margin-left: auto;">
+                        <button class="btn-icon btn-add-script-small" id="btn-add-script" title="Add New Script"aria-label="Add new script" style="width: 20px; height: 20px; margin-left: auto;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -89,8 +88,7 @@
                                 <path d="M12 5v14" />
                             </svg>
                         </button>
-                        <button class="btn-icon btn-add-script-small" id="btn-github-import" title="Import from GitHub"
-                            style="width: 20px; height: 20px; margin-left: 6px;">
+                        <button class="btn-icon btn-add-script-small" id="btn-github-import" title="Import from GitHub" aria-label="Import script from GitHub" style="width: 20px; height: 20px; margin-left: 6px;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -134,8 +132,7 @@
                                 <span class="dot dot-green"></span>
                             </span>
                             <span>Terminal 1</span>
-                            <button class="cli-tab-close" title="Close"
-                                onclick="event.stopPropagation(); closeTerminal(1)">
+                            <button class="cli-tab-close" title="Close" aria-label="Close terminal" onclick="event.stopPropagation(); closeTerminal(1)">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -144,7 +141,7 @@
                                 </svg>
                             </button>
                         </div>
-                        <button class="btn-icon btn-add-tab" id="btn-add-tab" title="New Terminal">
+                        <button class="btn-icon btn-add-tab" id="btn-add-tab" title="New Terminal" aria-label="Open new terminal">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -161,11 +158,11 @@
                                 <circle cx="11" cy="11" r="8"></circle>
                                 <path d="m21 21-4.3-4.3"></path>
                             </svg>
-                            <input type="text" id="cli-search-input" placeholder="Find... (Ctrl+F)" autocomplete="off">
+                            <input type="text" id="cli-search-input" aria-label="Search terminal output" placeholder="Find... (Ctrl+F)" autocomplete="off">
                             <span id="cli-search-results"></span>
                         </div>
                         <span class="run-status" id="run-status"></span>
-                        <button class="btn-icon btn-clear" id="btn-clear" title="Clear Terminal">
+                        <button class="btn-icon btn-clear" id="btn-clear" title="Clear Terminal" aria-label="Clear terminal">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -175,7 +172,7 @@
                         </button>
                     </div>
                 </div>
-                <div class="cli-body" id="terminal-body">
+                <div class="cli-body" id="terminal-body" role="log" aria-live="polite">
                     <div class="cli-welcome">
                         <span class="cli-prompt">$</span> <span class="cli-welcome-text">Welcome to DevShell. Select a
                             script to run, or type a command below.</span>
@@ -183,9 +180,8 @@
                 </div>
                 <div class="cli-input-bar">
                     <span class="cli-prompt-input">$</span>
-                    <input type="text" id="cli-input" placeholder="Type a command and press Enter..." autocomplete="off"
-                        spellcheck="false">
-                    <button class="btn btn-run-cmd" id="btn-run-cmd" title="Execute">
+                    <input type="text" id="cli-input" aria-label="Terminal command input" placeholder="Type a command and press Enter..." autocomplete="off" spellcheck="false">
+                    <button class="btn btn-run-cmd" id="btn-run-cmd" title="Execute" aria-label="Execute command">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="9 10 4 15 9 20" />
@@ -252,7 +248,7 @@
                             </svg>
                             <span>Overview</span>
                         </div>
-                        <button class="btn-icon btn-close-detail" id="btn-close-detail" title="Back to summary">
+                        <button class="btn-icon btn-close-detail" id="btn-close-detail" title="Back to summary" aria-label="Back to summary">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -267,7 +263,7 @@
                         <p id="detail-desc" class="script-description"></p>
                         <div class="tag-list" id="detail-tags"></div>
                         <div class="script-actions">
-                            <button class="btn btn-action" id="btn-lock" title="Change Lock Settings">
+                            <button class="btn btn-action" id="btn-lock" title="Change Lock Settings" aria-label="Change lock settings">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -275,7 +271,7 @@
                                     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                                 </svg>
                             </button>
-                            <button class="btn btn-action" id="btn-fav" title="Toggle Favorite">
+                            <button class="btn btn-action" id="btn-fav" title="Toggle Favorite" aria-label="Toggle favorite">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -283,7 +279,7 @@
                                         points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                                 </svg>
                             </button>
-                            <button class="btn btn-action" id="btn-edit" title="Edit Script">
+                            <button class="btn btn-action" id="btn-edit" title="Edit Script" aria-label="Edit script">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -303,7 +299,7 @@
                                 </svg>
                                 <span>Push / PR</span>
                             </button>
-                            <button class="btn btn-action btn-danger" id="btn-delete" title="Delete Script">
+                            <button class="btn btn-action btn-danger" id="btn-delete" title="Delete Script" aria-label="Delete script">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -314,7 +310,7 @@
                                     <line x1="14" x2="14" y1="11" y2="17" />
                                 </svg>
                             </button>
-                            <button class="btn btn-run" id="btn-run" title="Run Script">
+                            <button class="btn btn-run" id="btn-run" title="Run Script" aria-label="Run script">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -433,10 +429,10 @@
 
     <!-- ─── Add/Edit Modal ─────────────────────────────── -->
     <div class="modal-overlay" id="modal-overlay">
-        <div class="modal" id="script-modal">
+        <div class="modal" id="script-modal" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <h2 id="modal-title">New Script</h2>
-                <button class="btn-icon" id="modal-close">
+                <button class="btn-icon" id="modal-close" aria-label="Close modal">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 6 6 18" />
@@ -481,10 +477,10 @@ echo 'Hello World'"></textarea>
     </div>
 
     <div class="modal-overlay" id="github-modal-overlay">
-        <div class="modal" id="github-modal">
+        <div class="modal" id="github-modal" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <h2>Import from GitHub</h2>
-                <button class="btn-icon" id="github-modal-close">
+                <button class="btn-icon" id="github-modal-close" aria-label="Close GitHub import modal">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 6 6 18" />
@@ -525,10 +521,10 @@ echo 'Hello World'"></textarea>
 
     <!-- NEW FEATURE: PR Modal -> Replaces native browser prompt() to avoid aggressive blocking -->
     <div class="modal-overlay" id="pr-modal-overlay">
-        <div class="modal" id="pr-modal" style="width: 400px;">
+        <div class="modal" id="pr-modal" role="dialog" aria-modal="true" style="width: 400px;">
             <div class="modal-header">
                 <h2>Raise Pull Request</h2>
-                <button class="btn-icon" id="pr-modal-close">
+                <button class="btn-icon" id="pr-modal-close" aria-label="Close pull request modal">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 6 6 18" />
@@ -568,10 +564,10 @@ echo 'Hello World'"></textarea>
 
     <!-- Lock Management Modal -->
     <div class="modal-overlay" id="lock-modal-overlay">
-        <div class="modal" id="lock-modal" style="width: 400px;">
+        <div class="modal" id="lock-modal" role="dialog" aria-modal="true" style="width: 400px;">
             <div class="modal-header">
                 <h2>Manage Layout Lock</h2>
-                <button class="btn-icon" id="lock-modal-close">
+                <button class="btn-icon" id="lock-modal-close" aria-label="Close lock settings modal">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 6 6 18" />
@@ -629,7 +625,7 @@ echo 'Hello World'"></textarea>
             </div>
             <div class="debugger-header-right">
                 <span class="debugger-log-count" id="debugger-log-count">0 entries</span>
-                <button class="btn-icon" id="debugger-clear" title="Clear Console">
+                <button class="btn-icon" id="debugger-clear" title="Clear Console" aria-label="Clear debugger console">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M3 6h18" />
@@ -637,7 +633,7 @@ echo 'Hello World'"></textarea>
                         <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
                     </svg>
                 </button>
-                <button class="btn-icon" id="debugger-close" title="Close Debugger">
+                <button class="btn-icon" id="debugger-close" title="Close Debugger" aria-label="Close debugger">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 6 6 18" />
@@ -665,10 +661,11 @@ echo 'Hello World'"></textarea>
             <div class="debugger-input-wrapper">
                 <input type="text" id="debugger-input"
                     placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
+                <input type="text" id="debugger-input" aria-label="Debugger console input" placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
                     autocomplete="off" spellcheck="false">
                 <div class="debugger-suggestions" id="debugger-suggestions"></div>
             </div>
-            <button class="btn btn-run-cmd" id="debugger-eval-btn" title="Evaluate">
+            <button class="btn btn-run-cmd" id="debugger-eval-btn" title="Evaluate" aria-label="Evaluate JavaScript expression">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="9 10 4 15 9 20" />
