@@ -136,6 +136,7 @@ async function loadScripts() {
         renderWelcomeStats();
     } catch (err) {
         console.error('Failed to load scripts:', err);
+        notify(`Failed to load scripts: ${err.message}`, 'error');
     }
 }
 
@@ -153,6 +154,7 @@ async function fetchScriptContent(relPath, password = '') {
         return data.content || '';
     } catch (err) {
         console.error('Failed to load script content:', err);
+        notify(`Failed to load script content: ${err.message}`, 'error');
         return { error: err.message };
     }
 }
@@ -337,7 +339,7 @@ async function saveScript(category, filename, content) {
         const data = await res.json();
 
         if (res.status === 401) {
-            alert('Cannot save: Script is locked.');
+            notify('Cannot save: Script is locked.', 'warning');
             return;
         }
 
@@ -363,15 +365,17 @@ async function deleteScript(relPath) {
         });
         const data = await res.json();
         if (res.status === 401) {
-            alert("This script is locked. Unlock it first to delete.");
+            notify('This script is locked. Unlock it first to delete.', 'warning');
             return;
         }
 
         state.activeScript = null;
         showWelcome();
         await loadScripts();
+        notify('Script deleted successfully.', 'success');
     } catch (err) {
         console.error('Failed to delete script:', err);
+        notify(`Failed to delete script: ${err.message}`, 'error');
     }
 }
 
@@ -389,8 +393,15 @@ async function toggleFavorite(relPath) {
             const btnFav = document.getElementById('btn-fav');
             if (btnFav) btnFav.classList.toggle('active', data.favorite);
         }
+        notify(
+            data.favorite
+                ? 'Added to favorites.'
+                : 'Removed from favorites.',
+            'success'
+        );
     } catch (err) {
         console.error('Failed to toggle favorite:', err);
+        notify(`Failed to update favorite: ${err.message}`, 'error');
     }
 }
 
@@ -404,7 +415,7 @@ async function importGithubScript(url, category, filename) {
         const data = await res.json();
 
         if (res.status === 401) {
-            alert("File already exists and is locked.");
+            notify('File already exists and is locked.', 'warning');
             return;
         }
 
