@@ -8,16 +8,288 @@ import uuid
 import psutil
 import hashlib
 import urllib.request
+import re
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, send_from_directory, Response
 
 app = Flask(__name__, static_folder='ui', static_url_path='')
 
+BASE_DIR = os.environ.get('DEV_SHELL_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts')
 FAVORITES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'favorites.json')
 LOCKS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locks.json')
+LOG_ROOT = os.path.join(BASE_DIR, 'logs')
+EXECUTION_LOG_DIR = os.path.join(LOG_ROOT, 'executions')
+HISTORY_FILE = os.path.join(LOG_ROOT, 'history.jsonl')
+FAILED_HISTORY_FILE = os.path.join(LOG_ROOT, 'failed.jsonl')
+MAX_HISTORY_ENTRIES = 1000
+MAX_FAILED_HISTORY_ENTRIES = 500
+MAX_EXECUTION_LOG_FILES = 250
+LOG_RETENTION_DAYS = 30
+MAX_HISTORY_EXCERPT_CHARS = 2000
 
 # Store running/completed processes for resource monitoring
 processes = {}
+
+
+def _ensure_log_dirs():
+    os.makedirs(EXECUTION_LOG_DIR, exist_ok=True)
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+
+def _iso_now():
+    return _utc_now().isoformat(timespec='seconds')
+
+
+def _slugify(value, fallback='execution'):
+    safe = re.sub(r'[^A-Za-z0-9._-]+', '-', str(value or '')).strip('-._')
+    return safe[:48] or fallback
+
+
+def _append_jsonl(file_path, record):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, 'a', encoding='utf-8', newline='\n') as f:
+        json.dump(record, f, ensure_ascii=False)
+        f.write('\n')
+
+
+def _read_jsonl(file_path):
+    records = []
+    if not os.path.exists(file_path):
+        return records
+    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return records
+
+
+def _trim_jsonl(file_path, max_entries):
+    if not os.path.exists(file_path):
+        return
+    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+        lines = f.readlines()
+    if len(lines) <= max_entries:
+        return
+    with open(file_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.writelines(lines[-max_entries:])
+
+
+def _cleanup_old_execution_logs():
+    if not os.path.exists(EXECUTION_LOG_DIR):
+        return
+    now = time.time()
+    cutoff = now - (LOG_RETENTION_DAYS * 24 * 60 * 60)
+    logs = []
+    for name in os.listdir(EXECUTION_LOG_DIR):
+        path = os.path.join(EXECUTION_LOG_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            logs.append((os.path.getmtime(path), path))
+        except OSError:
+            continue
+
+    for _, path in logs:
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+        except OSError:
+            pass
+
+    logs = sorted(logs, key=lambda item: item[0], reverse=True)
+    for _, path in logs[MAX_EXECUTION_LOG_FILES:]:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _format_duration(seconds):
+    if seconds < 60:
+        return f'{seconds:.2f}s'
+    minutes = int(seconds // 60)
+    remaining = seconds % 60
+    return f'{minutes}m {remaining:.1f}s'
+
+
+def _start_execution_record(kind, display_name, command_text, shell_cmd='', cwd=''):
+    _ensure_log_dirs()
+    started_at = _utc_now()
+    execution_id = uuid.uuid4().hex[:8]
+    timestamp_token = started_at.strftime('%Y%m%dT%H%M%SZ')
+    log_name = f'{timestamp_token}_{kind}_{_slugify(display_name)}_{execution_id}.log'
+    log_path = os.path.join(EXECUTION_LOG_DIR, log_name)
+    log_handle = open(log_path, 'w', encoding='utf-8', newline='\n')
+
+    record = {
+        'id': execution_id,
+        'kind': kind,
+        'display_name': display_name,
+        'command': command_text,
+        'shell': shell_cmd,
+        'cwd': cwd,
+        'started_at': started_at.isoformat(),
+        'status': 'running',
+        'exit_code': None,
+        'duration_seconds': None,
+        'log_file': log_name,
+        'log_path': log_path,
+        'output_excerpt': '',
+        'success': False,
+    }
+
+    log_handle.write(f'[{record["started_at"]}] execution started\n')
+    log_handle.write(f'kind: {kind}\n')
+    log_handle.write(f'id: {execution_id}\n')
+    log_handle.write(f'display: {display_name}\n')
+    log_handle.write(f'command: {command_text}\n')
+    if shell_cmd:
+        log_handle.write(f'shell: {shell_cmd}\n')
+    if cwd:
+        log_handle.write(f'cwd: {cwd}\n')
+    log_handle.write('\n')
+    log_handle.flush()
+
+    return {
+        'record': record,
+        'handle': log_handle,
+        'excerpt_lines': [],
+        'excerpt_size': 0,
+    }
+
+
+def _append_execution_line(execution, stream_type, content):
+    if execution is None:
+        return
+    line = content.rstrip('\n')
+    if not line and stream_type != 'system':
+        return
+    timestamp = _iso_now()
+    execution['handle'].write(f'[{timestamp}] {stream_type}: {line}\n')
+    execution['handle'].flush()
+    excerpt_line = f'{stream_type}: {line}'
+    execution['excerpt_lines'].append(excerpt_line)
+    execution['excerpt_size'] += len(excerpt_line) + 1
+    while execution['excerpt_lines'] and execution['excerpt_size'] > MAX_HISTORY_EXCERPT_CHARS:
+        removed = execution['excerpt_lines'].pop(0)
+        execution['excerpt_size'] -= len(removed) + 1
+
+
+def _finalize_execution(execution, success, exit_code, duration_seconds, resources=None, error_message=''):
+    if execution is None:
+        return None
+
+    record = execution['record']
+    record['status'] = 'success' if success else 'failed'
+    record['success'] = bool(success)
+    record['exit_code'] = int(exit_code) if exit_code is not None else None
+    record['duration_seconds'] = round(duration_seconds, 3) if duration_seconds is not None else None
+    record['duration'] = _format_duration(duration_seconds or 0)
+    record['finished_at'] = _iso_now()
+    record['output_excerpt'] = '\n'.join(execution['excerpt_lines'])[-MAX_HISTORY_EXCERPT_CHARS:]
+    if resources:
+        record['resources'] = resources
+    if error_message:
+        record['error'] = error_message
+
+    execution['handle'].write('\n')
+    execution['handle'].write(f'[{record["finished_at"]}] status: {record["status"]}\n')
+    if record['exit_code'] is not None:
+        execution['handle'].write(f'exit_code: {record["exit_code"]}\n')
+    if record['duration_seconds'] is not None:
+        execution['handle'].write(f'duration_seconds: {record["duration_seconds"]}\n')
+    if error_message:
+        execution['handle'].write(f'error: {error_message}\n')
+    if resources:
+        execution['handle'].write(f'resources: {json.dumps(resources, ensure_ascii=False)}\n')
+    execution['handle'].close()
+
+    history_record = {
+        'id': record['id'],
+        'kind': record['kind'],
+        'display_name': record['display_name'],
+        'command': record['command'],
+        'shell': record['shell'],
+        'cwd': record['cwd'],
+        'started_at': record['started_at'],
+        'finished_at': record['finished_at'],
+        'status': record['status'],
+        'success': record['success'],
+        'exit_code': record['exit_code'],
+        'duration_seconds': record['duration_seconds'],
+        'duration': record['duration'],
+        'log_file': record['log_file'],
+        'output_excerpt': record['output_excerpt'],
+    }
+    if error_message:
+        history_record['error'] = error_message
+    if resources:
+        history_record['resources'] = resources
+
+    _append_jsonl(HISTORY_FILE, history_record)
+    if not success:
+        _append_jsonl(FAILED_HISTORY_FILE, history_record)
+
+    _trim_jsonl(HISTORY_FILE, MAX_HISTORY_ENTRIES)
+    _trim_jsonl(FAILED_HISTORY_FILE, MAX_FAILED_HISTORY_ENTRIES)
+    _cleanup_old_execution_logs()
+
+    return history_record
+
+
+def _load_history_entries(query='', status='all', kind='all', limit=200):
+    entries = _read_jsonl(HISTORY_FILE)
+    query = (query or '').strip().lower()
+    status = (status or 'all').strip().lower()
+    kind = (kind or 'all').strip().lower()
+
+    def matches(entry):
+        if status != 'all' and entry.get('status', '').lower() != status:
+            return False
+        if kind != 'all' and entry.get('kind', '').lower() != kind:
+            return False
+        if not query:
+            return True
+        haystack = ' '.join([
+            str(entry.get('command', '')),
+            str(entry.get('display_name', '')),
+            str(entry.get('output_excerpt', '')),
+            str(entry.get('status', '')),
+            str(entry.get('kind', '')),
+            str(entry.get('exit_code', '')),
+        ]).lower()
+        return query in haystack
+
+    filtered = [entry for entry in reversed(entries) if matches(entry)]
+    return filtered[:limit]
+
+
+def _history_summary():
+    entries = _read_jsonl(HISTORY_FILE)
+    total = len(entries)
+    failed = sum(1 for entry in entries if entry.get('status') == 'failed')
+    scripts = sum(1 for entry in entries if entry.get('kind') == 'script')
+    commands = sum(1 for entry in entries if entry.get('kind') == 'command')
+    return {
+        'total': total,
+        'failed': failed,
+        'successful': total - failed,
+        'scripts': scripts,
+        'commands': commands,
+    }
+
+
+_ensure_log_dirs()
+_cleanup_old_execution_logs()
 
 
 def load_favorites():
@@ -122,6 +394,84 @@ def list_scripts():
     return jsonify(get_all_scripts())
 
 
+@app.route('/api/history')
+def get_history():
+    query = request.args.get('q', '')
+    status = request.args.get('status', 'all')
+    kind = request.args.get('kind', 'all')
+    limit = request.args.get('limit', 200, type=int)
+    limit = max(1, min(limit or 200, 500))
+
+    entries = _load_history_entries(query=query, status=status, kind=kind, limit=limit)
+    return jsonify({
+        'entries': entries,
+        'summary': _history_summary(),
+        'query': {
+            'q': query,
+            'status': status,
+            'kind': kind,
+            'limit': limit,
+        }
+    })
+
+
+@app.route('/api/history/export')
+def export_history():
+    query = request.args.get('q', '')
+    status = request.args.get('status', 'all')
+    kind = request.args.get('kind', 'all')
+    export_format = request.args.get('format', 'log').lower()
+    entries = _load_history_entries(query=query, status=status, kind=kind, limit=500)
+
+    lines = [
+        'DevShell Execution History Export',
+        f'Generated: {_iso_now()}',
+        f'Filter: q={query or "*"} status={status} kind={kind}',
+        ''
+    ]
+
+    if not entries:
+        lines.append('No matching history entries found.')
+    else:
+        for entry in entries:
+            lines.extend([
+                f'[{entry.get("started_at", "")}] {entry.get("status", "unknown").upper()} {entry.get("kind", "execution").upper()} #{entry.get("id", "")}',
+                f'Command: {entry.get("command", "")}',
+                f'Display: {entry.get("display_name", "")}',
+                f'Exit Code: {entry.get("exit_code", "")}',
+                f'Duration: {entry.get("duration", "")}',
+                f'Log: {entry.get("log_file", "")}',
+            ])
+            excerpt = entry.get('output_excerpt', '').strip()
+            if excerpt:
+                lines.append('Output:')
+                lines.extend(f'  {line}' for line in excerpt.splitlines())
+            error = entry.get('error', '').strip()
+            if error:
+                lines.append(f'Error: {error}')
+            lines.append('')
+
+    export_text = '\n'.join(lines).rstrip() + '\n'
+    filename = f'devshell-history-{_slugify(status + "-" + kind)}.{"txt" if export_format == "txt" else "log"}'
+    return Response(
+        export_text,
+        mimetype='text/plain; charset=utf-8',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Cache-Control': 'no-store',
+        }
+    )
+
+
+@app.route('/logs/executions/<path:filename>')
+def get_execution_log(filename):
+    safe_name = os.path.basename(filename)
+    full_path = os.path.join(EXECUTION_LOG_DIR, safe_name)
+    if not os.path.exists(full_path):
+        return jsonify({'error': 'Log not found'}), 404
+    return send_from_directory(EXECUTION_LOG_DIR, safe_name, mimetype='text/plain', as_attachment=False)
+
+
 @app.route('/api/scripts/content', methods=['POST'])
 def get_script_content():
     data = request.json or {}
@@ -189,10 +539,18 @@ def run_script():
 
     run_id = str(uuid.uuid4())[:8]
     shell_cmd = _find_shell()
+    execution = _start_execution_record(
+        kind='script',
+        display_name=rel_path,
+        command_text=f'{shell_cmd} {full_path}',
+        shell_cmd=shell_cmd,
+        cwd=SCRIPTS_DIR,
+    )
 
     def generate():
+        proc = None
+        start_time = time.time()
         try:
-            start_time = time.time()
             proc = subprocess.Popen(
                 [shell_cmd, full_path],
                 stdout=subprocess.PIPE,
@@ -206,7 +564,8 @@ def run_script():
             metrics = {'cpu': 0.0, 'mem': 0.0}
             t_metrics = threading.Thread(target=_track_metrics, args=(proc, metrics))
             t_metrics.start()
-            
+
+            _append_execution_line(execution, 'system', f'Starting script execution... (ID: {run_id})')
             yield f"data: {json.dumps({'type': 'system', 'content': f'Starting script execution... (ID: {run_id})\n'})}\n\n"
 
             for line in iter(proc.stdout.readline, ''):
@@ -216,7 +575,7 @@ def run_script():
                     msg_type = 'stdout'
                     if any(err in l_lower for err in ['error:', 'failed:', 'not found', 'denied', 'no such file']):
                         msg_type = 'error'
-                    
+                    _append_execution_line(execution, msg_type, line)
                     yield f"data: {json.dumps({'type': msg_type, 'content': line})}\n\n"
 
             proc.stdout.close()
@@ -238,8 +597,28 @@ def run_script():
                 'memory_percent': round(mem_percent, 2),
             }
 
+            _append_execution_line(execution, 'system', f'Script completed with exit code {proc.returncode}')
+            _finalize_execution(
+                execution,
+                success=proc.returncode == 0,
+                exit_code=proc.returncode,
+                duration_seconds=elapsed,
+                resources=resource_info,
+            )
             yield f"data: {json.dumps({'type': 'metrics', 'resources': resource_info, 'exit_code': proc.returncode, 'success': proc.returncode == 0})}\n\n"
         except Exception as e:
+            _append_execution_line(execution, 'error', f'❌ Execution Error: {str(e)}')
+            if proc is not None and getattr(proc, 'returncode', None) is not None:
+                exit_code = proc.returncode
+            else:
+                exit_code = -1
+            _finalize_execution(
+                execution,
+                success=False,
+                exit_code=exit_code,
+                duration_seconds=time.time() - start_time,
+                error_message=str(e),
+            )
             yield f"data: {json.dumps({'type': 'error', 'content': f'❌ Execution Error: {str(e)}'})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream')
@@ -254,8 +633,17 @@ def exec_command():
         return jsonify({'error': 'No command provided'}), 400
 
     shell_cmd = _find_shell()
+    execution = _start_execution_record(
+        kind='command',
+        display_name=command,
+        command_text=command,
+        shell_cmd=shell_cmd,
+        cwd=SCRIPTS_DIR,
+    )
 
     def generate():
+        proc = None
+        start_time = time.time()
         try:
             # Need to format for Windows/Linux subshells correctly
             args = [shell_cmd, '-c', command] if shell_cmd != 'cmd.exe' else ['cmd.exe', '/c', command]
@@ -276,12 +664,33 @@ def exec_command():
                     msg_type = 'stdout'
                     if any(err in l_lower for err in ['error:', 'failed:', 'not found', 'denied', 'no such file']):
                         msg_type = 'error'
+                    _append_execution_line(execution, msg_type, line)
                     yield f"data: {json.dumps({'type': msg_type, 'content': line})}\n\n"
                     
             proc.stdout.close()
             proc.wait(timeout=10)
-            yield f"data: {json.dumps({'type': 'metrics', 'exit_code': proc.returncode, 'success': proc.returncode == 0})}\n\n"
+            elapsed = time.time() - start_time
+            _append_execution_line(execution, 'system', f'Command completed with exit code {proc.returncode}')
+            _finalize_execution(
+                execution,
+                success=proc.returncode == 0,
+                exit_code=proc.returncode,
+                duration_seconds=elapsed,
+            )
+            yield f"data: {json.dumps({'type': 'metrics', 'exit_code': proc.returncode, 'success': proc.returncode == 0, 'duration': round(elapsed, 3)})}\n\n"
         except Exception as e:
+            _append_execution_line(execution, 'error', f'❌ Command Error: {str(e)}')
+            if proc is not None and getattr(proc, 'returncode', None) is not None:
+                exit_code = proc.returncode
+            else:
+                exit_code = -1
+            _finalize_execution(
+                execution,
+                success=False,
+                exit_code=exit_code,
+                duration_seconds=time.time() - start_time,
+                error_message=str(e),
+            )
             yield f"data: {json.dumps({'type': 'error', 'content': f'❌ Command Error: {str(e)}'})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream')

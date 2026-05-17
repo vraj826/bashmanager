@@ -16,6 +16,8 @@ const API = {
     lock: '/api/scripts/lock',
     import_github: '/api/scripts/import_github',
     pr: '/api/git/pr',
+    history: '/api/history',
+    history_export: '/api/history/export',
 };
 
 // ─── State ────────────────────────────────────────────────
@@ -26,6 +28,10 @@ let state = {
     searchQuery: '',
     cmdHistory: [],
     cmdHistoryIndex: -1,
+    historyQuery: '',
+    historyFilter: 'all',
+    historyEntries: [],
+    historySummary: { total: 0, failed: 0, successful: 0, scripts: 0, commands: 0 },
     unlockedScripts: {}, // stores valid passwords for locked scripts: { "path": "pass" }
     terminals: [1],      // list of terminal IDs
     activeTerminalId: 1,
@@ -176,7 +182,7 @@ async function runScript(relPath) {
         resourcePanel.style.display = 'none';
     }
 
-    appendToCli(`$ Running script: ${relPath}`, 'cmd-line', termId);
+    appendToCli(`$ Running script: ${relPath}`, 'system', termId);
     // Mirror to debugger
     if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('info', `▶ Running script: ${relPath}`, 'script');
 
@@ -217,7 +223,7 @@ async function runScript(relPath) {
                         const data = JSON.parse(chunk.substring(6));
 
                         if (data.type === 'stdout' || data.type === 'error' || data.type === 'system') {
-                            let cssClass = data.type === 'stdout' ? 'stdout' : (data.type === 'system' ? 'cmd-line' : 'error');
+                            let cssClass = data.type === 'stdout' ? 'stdout' : (data.type === 'system' ? 'system' : 'stderr');
                             appendToCli(data.content, cssClass, termId);
                             // Mirror stdout/stderr to debugger
                             if (typeof DebuggerConsole !== 'undefined') {
@@ -257,13 +263,14 @@ async function runScript(relPath) {
             }
         }
     } catch (err) {
-        appendToCli(`Error executing script: ${err.message}`, 'error', termId);
+        appendToCli(`Error executing script: ${err.message}`, 'stderr', termId);
         if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `Script error: ${err.message}`, 'script');
         if (termId === state.activeTerminalId) {
             runStatus.textContent = 'Error';
             runStatus.className = 'run-status error';
         }
     } finally {
+        refreshExecutionHistoryIfVisible();
         if (btnRun) {
             btnRun.classList.remove('running');
             btnRun.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Run</span>`;
@@ -307,14 +314,14 @@ async function execCommand(cmd) {
                     try {
                         const data = JSON.parse(chunk.substring(6));
                         if (data.type === 'stdout' || data.type === 'error') {
-                            appendToCli(data.content, data.type === 'stdout' ? 'stdout' : 'error', termId);
+                            appendToCli(data.content, data.type === 'stdout' ? 'stdout' : 'stderr', termId);
                             // Mirror to debugger
                             if (typeof DebuggerConsole !== 'undefined') {
                                 DebuggerConsole.addEntry(data.type === 'error' ? 'error' : 'log', data.content.trimEnd(), 'terminal');
                             }
                         } else if (data.type === 'metrics') {
                             if (!data.success) {
-                                appendToCli(`Command failed (Exit code: ${data.exit_code})`, 'error', termId);
+                                appendToCli(`Command failed (Exit code: ${data.exit_code})`, 'stderr', termId);
                                 if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `Command failed — exit code: ${data.exit_code}`, 'terminal');
                             }
                         }
@@ -323,9 +330,149 @@ async function execCommand(cmd) {
             }
         }
     } catch (err) {
-        appendToCli(`Error executing command: ${err.message}`, 'error', termId);
+        appendToCli(`Error executing command: ${err.message}`, 'stderr', termId);
         if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `Command error: ${err.message}`, 'terminal');
+    } finally {
+        refreshExecutionHistoryIfVisible();
     }
+}
+
+async function loadExecutionHistory(query = '', filter = 'all', limit = 200) {
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    if (filter === 'failed') {
+        params.set('status', 'failed');
+    } else if (filter === 'command' || filter === 'script') {
+        params.set('kind', filter);
+    }
+    params.set('limit', String(limit));
+
+    const res = await fetch(`${API.history}?${params.toString()}`);
+    return res.json();
+}
+
+function formatHistoryDuration(entry) {
+    if (entry.duration) return entry.duration;
+    if (typeof entry.duration_seconds !== 'number') return '';
+    const seconds = entry.duration_seconds;
+    if (seconds < 60) return `${seconds.toFixed(2)}s`;
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}m ${(seconds % 60).toFixed(1)}s`;
+}
+
+function renderHistorySummary(summary = {}) {
+    const summaryEl = document.getElementById('history-summary');
+    if (!summaryEl) return;
+    summaryEl.innerHTML = [
+        `<span class="history-summary-item">Total <strong>${summary.total || 0}</strong></span>`,
+        `<span class="history-summary-item">Successful <strong>${summary.successful || 0}</strong></span>`,
+        `<span class="history-summary-item failed">Failed <strong>${summary.failed || 0}</strong></span>`,
+        `<span class="history-summary-item">Scripts <strong>${summary.scripts || 0}</strong></span>`,
+        `<span class="history-summary-item">Commands <strong>${summary.commands || 0}</strong></span>`,
+    ].join('');
+}
+
+function renderHistoryEntries(entries = []) {
+    const list = document.getElementById('history-list');
+    if (!list) return;
+
+    if (!entries.length) {
+        list.innerHTML = '<div class="history-empty-state">No execution history matches the current search.</div>';
+        return;
+    }
+
+    list.innerHTML = entries.map(entry => {
+        const statusClass = entry.status === 'failed' ? 'failed' : 'success';
+        const kindLabel = entry.kind === 'script' ? 'Script' : 'Command';
+        const duration = formatHistoryDuration(entry);
+        const excerpt = entry.output_excerpt ? escapeHtml(entry.output_excerpt).replace(/\n/g, '<br>') : '<span class="history-excerpt-empty">No output captured.</span>';
+        return `
+            <article class="history-entry ${statusClass}">
+                <div class="history-entry-head">
+                    <div class="history-entry-title-row">
+                        <span class="history-entry-status ${statusClass}">${entry.status}</span>
+                        <span class="history-entry-kind">${kindLabel}</span>
+                        <span class="history-entry-time">${escapeHtml(entry.started_at || '')}</span>
+                    </div>
+                    <div class="history-entry-meta">
+                        <span>ID ${escapeHtml(entry.id || '')}</span>
+                        ${duration ? `<span>${escapeHtml(duration)}</span>` : ''}
+                        ${entry.exit_code !== null && entry.exit_code !== undefined ? `<span>Exit ${escapeHtml(String(entry.exit_code))}</span>` : ''}
+                        <button class="btn btn-action history-log-link" data-log-file="${escapeAttr(entry.log_file || '')}">Open log</button>
+                    </div>
+                </div>
+                <div class="history-entry-command">${escapeHtml(entry.command || entry.display_name || '')}</div>
+                ${entry.error ? `<div class="history-entry-error">${escapeHtml(entry.error)}</div>` : ''}
+                <div class="history-entry-excerpt">${excerpt}</div>
+            </article>
+        `;
+    }).join('');
+
+    list.querySelectorAll('.history-log-link').forEach(button => {
+        button.addEventListener('click', () => {
+            const fileName = button.dataset.logFile;
+            if (!fileName) return;
+            window.open(`/logs/executions/${encodeURIComponent(fileName)}`, '_blank', 'noopener,noreferrer');
+        });
+    });
+}
+
+async function refreshExecutionHistoryIfVisible() {
+    const overlay = document.getElementById('history-modal-overlay');
+    if (!overlay || !overlay.classList.contains('active')) return;
+    await refreshExecutionHistory();
+}
+
+async function refreshExecutionHistory() {
+    const historyInput = document.getElementById('history-search');
+    const query = historyInput ? historyInput.value.trim() : state.historyQuery;
+    const activeFilterButton = document.querySelector('.history-filter.active');
+    const filter = activeFilterButton ? activeFilterButton.dataset.historyFilter : state.historyFilter;
+
+    state.historyQuery = query;
+    state.historyFilter = filter;
+
+    const payload = await loadExecutionHistory(query, filter);
+    state.historyEntries = payload.entries || [];
+    state.historySummary = payload.summary || state.historySummary;
+    renderHistorySummary(state.historySummary);
+    renderHistoryEntries(state.historyEntries);
+}
+
+function openHistoryViewer() {
+    const overlay = document.getElementById('history-modal-overlay');
+    if (!overlay) return;
+    overlay.classList.add('active');
+    refreshExecutionHistory();
+}
+
+function closeHistoryViewer() {
+    const overlay = document.getElementById('history-modal-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('active');
+}
+
+async function exportExecutionHistory(format = 'log') {
+    const params = new URLSearchParams();
+    if (state.historyQuery) params.set('q', state.historyQuery);
+    if (state.historyFilter === 'failed') {
+        params.set('status', 'failed');
+    } else if (state.historyFilter === 'command' || state.historyFilter === 'script') {
+        params.set('kind', state.historyFilter);
+    }
+    params.set('format', format);
+
+    const res = await fetch(`${API.history_export}?${params.toString()}`);
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `devshell-history.${format === 'txt' ? 'txt' : 'log'}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
 }
 
 async function saveScript(category, filename, content) {
@@ -1051,6 +1198,8 @@ function bindEvents() {
     });
 
     // Create / Refresh
+    const btnHistory = document.getElementById('btn-history');
+    if (btnHistory) btnHistory.addEventListener('click', openHistoryViewer);
     document.getElementById('btn-add-script').addEventListener('click', () => openModal('new'));
     document.getElementById('btn-refresh').addEventListener('click', () => loadScripts());
 
@@ -1070,6 +1219,36 @@ function bindEvents() {
     // Clear terminal
     document.getElementById('btn-clear').addEventListener('click', clearCli);
     document.getElementById('btn-close-detail').addEventListener('click', showWelcome);
+
+    const historyOverlay = document.getElementById('history-modal-overlay');
+    const historyClose = document.getElementById('history-modal-close');
+    const historySearch = document.getElementById('history-search');
+    const historyFilters = document.querySelectorAll('.history-filter');
+    const historyExportTxt = document.getElementById('history-export-txt');
+    const historyExportLog = document.getElementById('history-export-log');
+
+    if (historyClose) historyClose.addEventListener('click', closeHistoryViewer);
+    if (historyOverlay) {
+        historyOverlay.addEventListener('click', (e) => {
+            if (e.target === historyOverlay) closeHistoryViewer();
+        });
+    }
+    if (historySearch) {
+        let historySearchTimer;
+        historySearch.addEventListener('input', () => {
+            clearTimeout(historySearchTimer);
+            historySearchTimer = setTimeout(() => refreshExecutionHistory(), 180);
+        });
+    }
+    historyFilters.forEach(filterButton => {
+        filterButton.addEventListener('click', () => {
+            historyFilters.forEach(btn => btn.classList.remove('active'));
+            filterButton.classList.add('active');
+            refreshExecutionHistory();
+        });
+    });
+    if (historyExportTxt) historyExportTxt.addEventListener('click', () => exportExecutionHistory('txt'));
+    if (historyExportLog) historyExportLog.addEventListener('click', () => exportExecutionHistory('log'));
 
     // Main Modal controls
     document.getElementById('modal-close').addEventListener('click', closeModal);

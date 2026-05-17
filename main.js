@@ -40,7 +40,11 @@ function startFlaskServer() {
     console.log(`Starting Python server... (using ${pythonCmd})`);
 
     flaskProcess = spawn(pythonCmd, ['app.py'], {
-        cwd: __dirname
+        cwd: __dirname,
+        env: {
+            ...process.env,
+            DEV_SHELL_DATA_DIR: app.getPath('userData'),
+        }
     });
 
     flaskProcess.stdout.on('data', (data) => {

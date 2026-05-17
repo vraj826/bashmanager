@@ -7,6 +7,7 @@ DevShell is a lightweight, zero-database local script manager and execution envi
 - **Zero-DB Architecture:** Operates entirely on the local file system. Scripts are read directly from a structured `scripts/` directory. State and security parameters are maintained in local JSON files (`locks.json`, `favorites.json`).
 - **Real-Time Execution Engine:** Utilizes Server-Sent Events (SSE) to stream subprocess outputs (stdout/stderr) immediately to the frontend.
 - **Multi-Tab Terminal:** Supports isolated, concurrent terminal execution environments. 
+- **Persistent Execution History:** Stores timestamped command and script runs, failed executions, and per-run log files for later search and export.
 - **Process Resource Monitoring:** Features a dedicated background thread for tracking isolated CPU and memory usage statistics attributed strictly to the active script process.
 - **In-Memory Search Highlights:** Non-destructive DOM traversal algorithms allow live keyword grepping within active terminal streams.
 - **Local Password Locking:** Scripts can be securely locked behind a PBKDF2/SHA-256 local hash to prevent unauthorized reading or execution.
@@ -78,6 +79,7 @@ npm run build
 ## Project Scope & Structure
 
 - `app.py`: Main Flask application, API routing, subprocess handling, and SSE response generation.
+- `logs/`: Persistent execution history, failed-command records, and per-run `.log` files.
 - `scripts/`: Root directory for user scripts. Scripts are organized dynamically based on subfolders (categories).
 - `ui/`: Contains all frontend assets (`index.html`, `style.css`, `app.js`).
 - `main.js`: Electron initialization and window management.
