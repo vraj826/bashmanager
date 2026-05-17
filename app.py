@@ -8,6 +8,7 @@ import uuid
 import psutil
 import hashlib
 import urllib.request
+import urllib.parse
 import re
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, send_from_directory, Response
@@ -814,6 +815,13 @@ def import_github():
     # Convert standard github url to raw
     if "github.com" in url and "/blob/" in url:
         url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+
+    # SSRF guard: only allow GitHub domains after rewrite
+    _parsed = urllib.parse.urlparse(url)
+    _ALLOWED = {'github.com', 'raw.githubusercontent.com'}
+    _ALLOWED_SCHEMES = {'http', 'https'}
+    if _parsed.scheme.lower() not in _ALLOWED_SCHEMES or _parsed.hostname not in _ALLOWED:
+        return jsonify({'error': 'Only GitHub URLs are allowed', 'success': False}), 400
 
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 DevShell'})
