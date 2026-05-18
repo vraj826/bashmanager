@@ -499,6 +499,12 @@ def get_script_content():
 
 
 def _track_metrics(proc, result):
+    """
+    Background telemetry thread to track execution resource utilization.
+    Traverses the process hierarchy recursively to sum parent and descendant 
+    resource metrics (CPU % and RSS memory). Reuses Process objects to ensure 
+    cpu_percent() has consistent deltas.
+    """
     max_mem_mb = 0.0
     samples = 0
     total_cpu = 0.0
