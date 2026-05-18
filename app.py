@@ -853,7 +853,12 @@ def raise_pr():
         return jsonify({'error': 'No script path provided', 'success': False}), 400
 
     full_path = os.path.join(SCRIPTS_DIR, rel_path)
-    
+    full_path = os.path.normpath(full_path)
+
+    # Security check: prevent path traversal outside scripts directory
+    if not full_path.startswith(os.path.normpath(SCRIPTS_DIR)):
+        return jsonify({'error': 'Invalid path'}), 403
+
     try:
         # Check if we are in a git repo
         subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], check=True, capture_output=True)
