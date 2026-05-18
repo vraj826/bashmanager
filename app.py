@@ -712,6 +712,47 @@ def exec_command():
     return Response(generate(), mimetype='text/event-stream')
 
 
+@app.route('/api/sessions/save', methods=['POST'])
+def save_session():
+    data = request.json
+    session_data = data.get('session', {})
+
+    try:
+        sessions = load_sessions()
+
+        sessions['last_session'] = session_data
+        sessions['last_updated'] = time.time()
+
+        save_sessions(sessions)
+
+        return jsonify({
+            'success': True
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/sessions/restore', methods=['GET'])
+def restore_session():
+    try:
+        sessions = load_sessions()
+
+        return jsonify({
+            'success': True,
+            'session': sessions.get('last_session', {})
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/scripts/save', methods=['POST'])
 def save_script():
     data = request.json
