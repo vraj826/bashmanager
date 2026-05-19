@@ -22,3 +22,5 @@ devshell/
 *.dat
 *.pak
 *.so
+logs/
+sessions.json

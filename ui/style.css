@@ -955,6 +955,7 @@ body {
 
 .script-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     align-items: center;
     margin-top: 12px;

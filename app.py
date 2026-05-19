@@ -9,6 +9,7 @@ import uuid
 import psutil
 import hashlib
 import urllib.request
+import urllib.parse
 import re
 import shutil
 from datetime import datetime, timezone
@@ -32,6 +33,10 @@ WORKSPACE_PROFILE_DIR = os.path.join(WORKSPACE_DIR, 'profiles')
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 os.makedirs(WORKSPACE_PROFILE_DIR, exist_ok=True)
 
+SESSIONS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'sessions.json'
+)
 MAX_HISTORY_ENTRIES = 1000
 MAX_FAILED_HISTORY_ENTRIES = 500
 MAX_EXECUTION_LOG_FILES = 250
@@ -478,6 +483,18 @@ def save_locks(locks):
         json.dump(locks, f)
 
 
+def load_sessions():
+    if os.path.exists(SESSIONS_FILE):
+        with open(SESSIONS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+
+def save_sessions(sessions):
+    with open(SESSIONS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(sessions, f, indent=2)
+
+
 def check_lock(rel_path, provided_pass):
     locks = load_locks()
     if rel_path in locks:
@@ -830,22 +847,69 @@ def get_script_content():
 
 
 def _track_metrics(proc, result):
-    cpu_percent = 0.0
+    """
+    Background telemetry thread to track execution resource utilization.
+    Traverses the process hierarchy recursively to sum parent and descendant 
+    resource metrics (CPU % and RSS memory). Reuses Process objects to ensure 
+    cpu_percent() has consistent deltas.
+    """
     max_mem_mb = 0.0
     samples = 0
     total_cpu = 0.0
     try:
         p = psutil.Process(proc.pid)
+        # Prime cpu_percent counter for parent (first call always returns 0)
+        p.cpu_percent()
+
+        # Cache of pid → psutil.Process so cpu_percent() has prior baselines
+        tracked_children = {}
+
         while proc.poll() is None:
-            c = p.cpu_percent(interval=0.1)
-            # rss is resident set size (memory)
-            m = p.memory_info().rss / (1024 * 1024)
-            total_cpu += c
-            max_mem_mb = max(max_mem_mb, m)
+            time.sleep(0.1)
+            sample_cpu = 0.0
+            sample_mem = 0.0
+
+            # Discover current child pids
+            current_child_pids = set()
+            try:
+                for child in p.children(recursive=True):
+                    current_child_pids.add(child.pid)
+                    if child.pid not in tracked_children:
+                        tracked_children[child.pid] = child
+                        # Prime new child so next cycle gets a real delta
+                        try:
+                            child.cpu_percent()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+            # Remove stale entries for children that have exited
+            for stale_pid in list(tracked_children.keys()):
+                if stale_pid not in current_child_pids:
+                    del tracked_children[stale_pid]
+
+            # Measure parent
+            try:
+                sample_cpu += p.cpu_percent()
+                sample_mem += p.memory_info().rss / (1024 * 1024)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+            # Measure tracked children (reused objects → accurate cpu deltas)
+            for child_proc in tracked_children.values():
+                try:
+                    sample_cpu += child_proc.cpu_percent()
+                    sample_mem += child_proc.memory_info().rss / (1024 * 1024)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            total_cpu += sample_cpu
+            max_mem_mb = max(max_mem_mb, sample_mem)
             samples += 1
-    except (psutil.NoSuchProcess, Exception):
+    except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
         pass
-    
+
     result['cpu'] = round(total_cpu / samples, 1) if samples > 0 else 0.0
     result['mem'] = round(max_mem_mb, 1)
 
@@ -1031,6 +1095,47 @@ def exec_command():
     return Response(generate(), mimetype='text/event-stream')
 
 
+@app.route('/api/sessions/save', methods=['POST'])
+def save_session():
+    data = request.json
+    session_data = data.get('session', {})
+
+    try:
+        sessions = load_sessions()
+
+        sessions['last_session'] = session_data
+        sessions['last_updated'] = time.time()
+
+        save_sessions(sessions)
+
+        return jsonify({
+            'success': True
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/sessions/restore', methods=['GET'])
+def restore_session():
+    try:
+        sessions = load_sessions()
+
+        return jsonify({
+            'success': True,
+            'session': sessions.get('last_session', {})
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/scripts/save', methods=['POST'])
 def save_script():
     data = request.json
@@ -1167,6 +1272,19 @@ def import_github():
             }
         )
 
+    # Convert standard github url to raw
+    if "github.com" in url and "/blob/" in url:
+        url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+
+    # SSRF guard: only allow GitHub domains after rewrite
+    _parsed = urllib.parse.urlparse(url)
+    _ALLOWED = {'github.com', 'raw.githubusercontent.com'}
+    _ALLOWED_SCHEMES = {'http', 'https'}
+    if _parsed.scheme.lower() not in _ALLOWED_SCHEMES or _parsed.hostname not in _ALLOWED:
+        return jsonify({'error': 'Only GitHub URLs are allowed', 'success': False}), 400
+
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 DevShell'})
         with urllib.request.urlopen(req, timeout=10) as response:
             raw_bytes = response.read()
 
@@ -1253,7 +1371,12 @@ def raise_pr():
         return jsonify({'error': 'No script path provided', 'success': False}), 400
 
     full_path = os.path.join(SCRIPTS_DIR, rel_path)
-    
+    full_path = os.path.normpath(full_path)
+
+    # Security check: prevent path traversal outside scripts directory
+    if not full_path.startswith(os.path.normpath(SCRIPTS_DIR)):
+        return jsonify({'error': 'Invalid path'}), 403
+
     try:
         # Check if we are in a git repo
         subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], check=True, capture_output=True)
