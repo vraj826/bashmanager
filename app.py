@@ -1,3 +1,4 @@
+from importlib import resources
 import os
 import json
 import time
@@ -21,8 +22,10 @@ FAVORITES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'favor
 LOCKS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locks.json')
 LOG_ROOT = os.path.join(BASE_DIR, 'logs')
 EXECUTION_LOG_DIR = os.path.join(LOG_ROOT, 'executions')
+SESSION_LOG_DIR = os.path.join(LOG_ROOT, 'sessions')
 HISTORY_FILE = os.path.join(LOG_ROOT, 'history.jsonl')
 FAILED_HISTORY_FILE = os.path.join(LOG_ROOT, 'failed.jsonl')
+COMMAND_HISTORY_FILE = os.path.join(LOG_ROOT, 'command_history.json')
 SESSIONS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     'sessions.json'
@@ -39,6 +42,7 @@ processes = {}
 
 def _ensure_log_dirs():
     os.makedirs(EXECUTION_LOG_DIR, exist_ok=True)
+    os.makedirs(SESSION_LOG_DIR, exist_ok=True)
 
 
 def _utc_now():
@@ -129,6 +133,7 @@ def _format_duration(seconds):
 def _start_execution_record(kind, display_name, command_text, shell_cmd='', cwd=''):
     _ensure_log_dirs()
     started_at = _utc_now()
+    monotonic_start = time.perf_counter()
     execution_id = uuid.uuid4().hex[:8]
     timestamp_token = started_at.strftime('%Y%m%dT%H%M%SZ')
     log_name = f'{timestamp_token}_{kind}_{_slugify(display_name)}_{execution_id}.log'
@@ -150,6 +155,7 @@ def _start_execution_record(kind, display_name, command_text, shell_cmd='', cwd=
         'log_path': log_path,
         'output_excerpt': '',
         'success': False,
+        'session_file': f'{execution_id}.json',
     }
 
     log_handle.write(f'[{record["started_at"]}] execution started\n')
@@ -164,11 +170,26 @@ def _start_execution_record(kind, display_name, command_text, shell_cmd='', cwd=
     log_handle.write('\n')
     log_handle.flush()
 
+    session_data = {
+    'metadata': {
+        'id': execution_id,
+        'kind': kind,
+        'display_name': display_name,
+        'command': command_text,
+        'shell': shell_cmd,
+        'cwd': cwd,
+        'started_at': started_at.isoformat(),
+    },
+    'events': []
+    }
+
     return {
-        'record': record,
-        'handle': log_handle,
-        'excerpt_lines': [],
-        'excerpt_size': 0,
+    'record': record,
+    'handle': log_handle,
+    'excerpt_lines': [],
+    'excerpt_size': 0,
+    'session_data': session_data,
+    'monotonic_start': monotonic_start,
     }
 
 
@@ -179,6 +200,15 @@ def _append_execution_line(execution, stream_type, content):
     if not line and stream_type != 'system':
         return
     timestamp = _iso_now()
+    elapsed = round(
+    time.perf_counter() - execution['monotonic_start'],
+    4
+    )
+    execution['session_data']['events'].append({
+    'timestamp': elapsed,
+    'stream': stream_type,
+    'content': line
+    })
     execution['handle'].write(f'[{timestamp}] {stream_type}: {line}\n')
     execution['handle'].flush()
     excerpt_line = f'{stream_type}: {line}'
@@ -216,11 +246,32 @@ def _finalize_execution(execution, success, exit_code, duration_seconds, resourc
         execution['handle'].write(f'error: {error_message}\n')
     if resources:
         execution['handle'].write(f'resources: {json.dumps(resources, ensure_ascii=False)}\n')
+    session_path = os.path.join(
+    SESSION_LOG_DIR,
+    record['session_file']
+    )
+    execution['session_data']['metadata'].update({
+    'finished_at': record['finished_at'],
+    'duration_seconds': record['duration_seconds'],
+    'exit_code': record['exit_code'],
+    'status': record['status'],
+    'success': record['success'],
+    })
+    if resources:
+        execution['session_data']['metadata']['resources'] = resources
+    with open(session_path, 'w', encoding='utf-8') as sf:
+        json.dump(
+            execution['session_data'],
+            sf,
+            indent=2,
+            ensure_ascii=False
+        )
     execution['handle'].close()
 
     history_record = {
         'id': record['id'],
         'kind': record['kind'],
+        'session_file': record['session_file'],
         'display_name': record['display_name'],
         'command': record['command'],
         'shell': record['shell'],
@@ -249,6 +300,36 @@ def _finalize_execution(execution, success, exit_code, duration_seconds, resourc
     _cleanup_old_execution_logs()
 
     return history_record
+
+
+def load_command_history():
+    if not os.path.exists(COMMAND_HISTORY_FILE):
+        return []
+
+    try:
+        with open(COMMAND_HISTORY_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    except Exception:
+        return []
+
+
+def save_command_history(command):
+    if not command.strip():
+        return
+
+    history = load_command_history()
+
+    # Remove duplicates
+    history = [c for c in history if c != command]
+
+    history.insert(0, command)
+
+    # Keep latest 200
+    history = history[:200]
+
+    with open(COMMAND_HISTORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(history, f, indent=2)
 
 
 def _load_history_entries(query='', status='all', kind='all', limit=200):
@@ -432,6 +513,73 @@ def get_history():
     })
 
 
+@app.route('/api/command_history')
+def get_command_history():
+    return jsonify({
+        'success': True,
+        'history': load_command_history()
+    })
+
+
+@app.route('/api/history/analytics')
+def history_analytics():
+    entries = _load_history_entries(limit=1000)
+
+    total = len(entries)
+
+    successful = sum(
+        1 for e in entries if e.get('success')
+    )
+
+    failed = total - successful
+
+    avg_duration = round(
+        sum(
+            e.get('duration_seconds', 0)
+            for e in entries
+        ) / total,
+        2
+    ) if total else 0
+
+    script_counts = {}
+
+    for entry in entries:
+        name = entry.get('display_name', 'Unknown')
+        script_counts[name] = (
+            script_counts.get(name, 0) + 1
+        )
+
+    top_scripts = sorted(
+        script_counts.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:5]
+
+    slowest = sorted(
+        entries,
+        key=lambda e: e.get('duration_seconds', 0),
+        reverse=True
+    )[:5]
+
+    recent_failures = [
+        e for e in entries
+        if not e.get('success')
+    ][:5]
+
+    return jsonify({
+        'success': True,
+        'summary': {
+            'total': total,
+            'successful': successful,
+            'failed': failed,
+            'avg_duration': avg_duration
+        },
+        'top_scripts': top_scripts,
+        'slowest': slowest,
+        'recent_failures': recent_failures
+    })
+
+
 @app.route('/api/history/export')
 def export_history():
     query = request.args.get('q', '')
@@ -488,6 +636,25 @@ def get_execution_log(filename):
         return jsonify({'error': 'Log not found'}), 404
     return send_from_directory(EXECUTION_LOG_DIR, safe_name, mimetype='text/plain', as_attachment=False)
 
+@app.route('/api/history/session/<session_id>')
+def get_session(session_id):
+    safe_name = os.path.basename(session_id)
+
+    if not safe_name.endswith('.json'):
+        safe_name += '.json'
+
+    session_path = os.path.join(
+        SESSION_LOG_DIR,
+        safe_name
+    )
+
+    if not os.path.exists(session_path):
+        return jsonify({'error': 'Session not found'}), 404
+
+    with open(session_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    return jsonify(data)
 
 @app.route('/api/scripts/content', methods=['POST'])
 def get_script_content():
@@ -630,7 +797,8 @@ def run_script():
             t_metrics.start()
 
             _append_execution_line(execution, 'system', f'Starting script execution... (ID: {run_id})')
-            yield f"data: {json.dumps({'type': 'system', 'content': f'Starting script execution... (ID: {run_id})\n'})}\n\n"
+            start_message = f'Starting script execution... (ID: {run_id})\n'
+            yield f"data: {json.dumps({'type': 'system', 'content': start_message})}\n\n"
 
             for line in iter(proc.stdout.readline, ''):
                 if line:
@@ -695,6 +863,8 @@ def exec_command():
 
     if not command:
         return jsonify({'error': 'No command provided'}), 400
+
+    save_command_history(command)
 
     shell_cmd = _find_shell()
     execution = _start_execution_record(
@@ -911,10 +1081,31 @@ def import_github():
     filename = data.get('filename', '').strip()
 
     if not url or not category or not filename:
-        return jsonify({'error': 'Missing fields', 'success': False}), 400
+        return jsonify({
+            'error': 'Missing fields',
+            'success': False
+        }), 400
 
     if not filename.endswith('.sh'):
         filename += '.sh'
+
+    # Convert standard GitHub URL → raw URL
+    if "github.com" in url and "/blob/" in url:
+        url = (
+            url.replace(
+                "github.com",
+                "raw.githubusercontent.com"
+            )
+            .replace("/blob/", "/")
+        )
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                'User-Agent': 'Mozilla/5.0 DevShell'
+            }
+        )
 
     # Convert standard github url to raw
     if "github.com" in url and "/blob/" in url:
@@ -930,26 +1121,76 @@ def import_github():
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 DevShell'})
         with urllib.request.urlopen(req, timeout=10) as response:
-            content = response.read().decode('utf-8')
-    except Exception as e:
-        return jsonify({'error': f'Failed to fetch from GitHub: {str(e)}', 'success': False}), 400
+            raw_bytes = response.read()
 
-    category = category.replace('..', '').replace('/', '').replace('\\', '')
-    filename = filename.replace('..', '').replace('/', '').replace('\\', '')
-    
-    # We will overwrite without checking pass since it doesn't exist yet, but if it does we should check pass.
+        # Prevent huge imports
+        if len(raw_bytes) > 500000:
+            return jsonify({
+                'error': 'File too large (max 500KB)',
+                'success': False
+            }), 400
+
+        try:
+            content = raw_bytes.decode('utf-8')
+
+        except UnicodeDecodeError:
+            return jsonify({
+                'error': 'Only UTF-8 text files are supported',
+                'success': False
+            }), 400
+
+        # Reject binary payloads
+        if '\0' in content:
+            return jsonify({
+                'error': 'Binary files are not supported',
+                'success': False
+            }), 400
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Failed to fetch from GitHub: {str(e)}',
+            'success': False
+        }), 400
+
+    # Sanitize paths
+    category = (
+        category
+        .replace('..', '')
+        .replace('/', '')
+        .replace('\\', '')
+    )
+
+    filename = (
+        filename
+        .replace('..', '')
+        .replace('/', '')
+        .replace('\\', '')
+    )
+
     rel_path = f'{category}/{filename}'
+    # Respect existing lock protection
     if not check_lock(rel_path, ''):
-        return jsonify({'error': 'File exists and is locked!', 'success': False}), 401
+        return jsonify({
+            'error': 'File exists and is locked!',
+            'success': False
+        }), 401
 
     cat_dir = os.path.join(SCRIPTS_DIR, category)
     os.makedirs(cat_dir, exist_ok=True)
     full_path = os.path.join(cat_dir, filename)
-    with open(full_path, 'w', encoding='utf-8', newline='\n') as f:
+
+    with open(
+        full_path,
+        'w',
+        encoding='utf-8',
+        newline='\n'
+    ) as f:
         f.write(content)
 
-    return jsonify({'success': True, 'path': rel_path})
-
+    return jsonify({
+        'success': True,
+        'path': rel_path
+    })
 
 # --- NEW FEATURE: Raise PR / Push to Git ---
 @app.route('/api/git/pr', methods=['POST'])
@@ -976,7 +1217,9 @@ def raise_pr():
         subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], check=True, capture_output=True)
         
         # 1. Create new local branch for the contribution
-        subprocess.run(['git', 'checkout', '-b', branch_name], check=True, capture_output=True)
+        checkout_existing = subprocess.run(['git', 'checkout', branch_name], capture_output=True)
+        if checkout_existing.returncode != 0:
+            subprocess.run(['git', 'checkout', '-b', branch_name], check=True, capture_output=True)
         
         # 2. Stage only the specific script file
         subprocess.run(['git', 'add', full_path], check=True, capture_output=True)
@@ -1005,14 +1248,16 @@ def raise_pr():
         pr_url = f"{remote_url}/compare/main...{branch_name}" if "github.com" in remote_url else remote_url
         
         # 6. Switch back to the main branch to keep the workspace stable
-        subprocess.run(['git', 'checkout', 'main'], check=True, capture_output=True)
+        default_branch = get_default_branch()
+        subprocess.run(['git', 'checkout', default_branch], check=True, capture_output=True)
         
         return jsonify({'success': True, 'pr_url': pr_url, 'branch': branch_name})
         
     except subprocess.CalledProcessError as e:
         err_msg = e.stderr.decode() if e.stderr else str(e)
         # Attempt recovery to main
-        subprocess.run(['git', 'checkout', 'main'], capture_output=True)
+        default_branch = get_default_branch()
+        subprocess.run(['git', 'checkout', default_branch], capture_output=True)
         return jsonify({'error': err_msg, 'success': False}), 500
     except Exception as e:
         return jsonify({'error': str(e), 'success': False}), 500
@@ -1042,6 +1287,21 @@ def _find_shell():
 
     return 'sh'
 
+def get_default_branch():
+    try:
+        result = subprocess.run(
+            ['git', 'symbolic-ref', 'refs/remotes/origin/HEAD'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        ref = result.stdout.strip()
+
+        return ref.split('/')[-1]
+
+    except Exception:
+        return 'main'
 
 def _format_time(seconds):
     if seconds < 0.001:

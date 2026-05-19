@@ -31,7 +31,20 @@ let state = {
     historyQuery: '',
     historyFilter: 'all',
     historyEntries: [],
-    historySummary: { total: 0, failed: 0, successful: 0, scripts: 0, commands: 0 },
+    historySummary: {
+        total: 0,
+        failed: 0,
+        successful: 0,
+        scripts: 0,
+        commands: 0
+    },
+    replay: {
+        playing: false,
+        timer: null,
+        events: [],
+        index: 0,
+        speed: 1
+    },
     unlockedScripts: {}, // stores valid passwords for locked scripts: { "path": "pass" }
     terminals: [1],      // list of terminal IDs
     activeTerminalId: 1,
@@ -63,8 +76,68 @@ function getCategoryIcon(name) {
 }
 
 // ─── Init ──────────────────────────────────────────────────
+async function openAnalytics() {
+    try {
+        const res = await fetch('/api/history/analytics');
+        const data = await res.json();
+
+        if (!data.success) {
+            notify('Failed to load analytics.', 'error');
+            return;
+        }
+
+        const summary = data.summary;
+
+        document.getElementById('analytics-total').textContent = summary.total;
+        document.getElementById('analytics-success').textContent = summary.successful;
+        document.getElementById('analytics-failed').textContent = summary.failed;
+        document.getElementById('analytics-avg').textContent = `${summary.avg_duration}s`;
+
+        document.getElementById('analytics-top-scripts').innerHTML =
+            data.top_scripts.map(([name, count]) => `
+                <div class="analytics-item">
+                    ${escapeHtml(name)} — ${count} runs
+                </div>
+            `).join('');
+
+        document.getElementById('analytics-slowest').innerHTML =
+            data.slowest.map(entry => `
+                <div class="analytics-item">
+                    ${escapeHtml(entry.display_name)} — ${entry.duration_seconds}s
+                </div>
+            `).join('');
+
+        document.getElementById('analytics-failures').innerHTML =
+            data.recent_failures.map(entry => `
+                <div class="analytics-item">
+                    ${escapeHtml(entry.display_name)} — Exit ${entry.exit_code}
+                </div>
+            `).join('');
+
+        document.getElementById('analytics-modal-overlay').classList.add('active');
+
+    } catch (err) {
+        console.error(err);
+        notify(`Analytics failed: ${err.message}`, 'error');
+    }
+}
+
+async function loadCommandHistory() {
+    try {
+        const res = await fetch('/api/command_history');
+        const data = await res.json();
+
+        if (data.success) {
+            state.cmdHistory = data.history || [];
+        }
+    } catch (err) {
+        console.error('Failed to load command history:', err);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-    loadScripts();
+    await loadScripts();
+    await loadCommandHistory();
     bindEvents();
     initResizers();
     await restoreSession();
@@ -402,6 +475,12 @@ function renderHistoryEntries(entries = []) {
                         ${duration ? `<span>${escapeHtml(duration)}</span>` : ''}
                         ${entry.exit_code !== null && entry.exit_code !== undefined ? `<span>Exit ${escapeHtml(String(entry.exit_code))}</span>` : ''}
                         <button class="btn btn-action history-log-link" data-log-file="${escapeAttr(entry.log_file || '')}">Open log</button>
+                        <button
+                            class="history-replay-btn"
+                            onclick="openReplay('${entry.id}')"
+                            aria-label="Replay execution session">
+                            ▶ Replay
+                        </button>
                     </div>
                 </div>
                 <div class="history-entry-command">${escapeHtml(entry.command || entry.display_name || '')}</div>
@@ -479,20 +558,35 @@ async function exportExecutionHistory(format = 'log') {
 }
 
 async function saveScript(category, filename, content) {
+    const btn = document.getElementById('modal-save');
+
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+    }
     try {
-        const relPath = `${category}/${filename}`.replace(/\/+/g, '/'); // simple guess
+        const relPath = `${category}/${filename}`.replace(/\/+/g, '/');
+
         const res = await fetch(API.save, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category, filename, content, password: state.unlockedScripts[relPath] || '' }),
+            body: JSON.stringify({
+                category,
+                filename,
+                content,
+                password: state.unlockedScripts[relPath] || ''
+            }),
         });
         const data = await res.json();
 
         if (res.status === 401) {
             notify('Cannot save: Script is locked.', 'warning');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Save';
+            }
             return;
         }
-
         if (data.success) {
             await loadScripts();
             closeModal();
@@ -502,6 +596,11 @@ async function saveScript(category, filename, content) {
     } catch (err) {
         console.error('Failed to save script:', err);
         notify(`Failed to save script: ${err.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Save';
+        }
     }
 }
 
@@ -556,31 +655,66 @@ async function toggleFavorite(relPath) {
 }
 
 async function importGithubScript(url, category, filename) {
+    const btn = document.getElementById('github-modal-import');
+
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Importing...';
+    }
     try {
         const res = await fetch(API.import_github, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, category, filename }),
+            body: JSON.stringify({
+                url,
+                category,
+                filename
+            }),
         });
         const data = await res.json();
 
         if (res.status === 401) {
-            notify('File already exists and is locked.', 'warning');
+            notify(
+                'File already exists and is locked.',
+                'warning'
+            );
+
             return;
         }
 
         if (data.success) {
             await loadScripts();
-            document.getElementById('github-modal-overlay').classList.remove('active');
+            document
+                .getElementById('github-modal-overlay')
+                .classList.remove('active');
+
             selectScript(data.path);
-            appendToCli(`✓ Imported script from GitHub: ${data.path}`, 'success');
-            notify('Script imported successfully.', 'success');
+            appendToCli(
+                `✓ Imported script from GitHub: ${data.path}`,
+                'success'
+            );
+            notify(
+                'Script imported successfully.',
+                'success'
+            );
         } else {
-            notify(`Import failed: ${data.error}`, 'error');
+            notify(
+                `Import failed: ${data.error}`,
+                'error'
+            );
         }
     } catch (err) {
         console.error('Import error:', err);
-        notify(`Exception during import: ${err.message}`, 'error');
+
+        notify(
+            `Exception during import: ${err.message}`,
+            'error'
+        );
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Import';
+        }
     }
 }
 
@@ -603,49 +737,125 @@ function raisePRFlow(relPath) {
 
 // 2. Executes the API call to the backend after the modal is submitted
 async function executePR(relPath, branch, message, repoUrl) {
-    // Hide the modal immediately
-    document.getElementById('pr-modal-overlay').classList.remove('active');
+    const btn = document.getElementById('pr-modal-submit');
 
-    // Automatically toggle the Debugger Console to show progress logs to the user
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Pushing...';
+    }
+    // Hide modal immediately
+    document
+        .getElementById('pr-modal-overlay')
+        .classList.remove('active');
+
+    // Show debugger logs
     if (typeof DebuggerConsole !== 'undefined') {
         DebuggerConsole.toggle();
-        DebuggerConsole.addEntry('info', `🚀 Starting Git PR workflow for: ${relPath}`, 'git');
-        if (repoUrl) DebuggerConsole.addEntry('info', `   Target Repo: ${repoUrl}`, 'git');
-        DebuggerConsole.addEntry('info', `   Branch: ${branch}`, 'git');
-        DebuggerConsole.addEntry('info', `   Message: ${message}`, 'git');
-        DebuggerConsole.addEntry('info', `Running git operations in backend...`, 'git');
+
+        DebuggerConsole.addEntry(
+            'info',
+            `🚀 Starting Git PR workflow for: ${relPath}`,
+            'git'
+        );
+        if (repoUrl) {
+            DebuggerConsole.addEntry(
+                'info',
+                `   Target Repo: ${repoUrl}`,
+                'git'
+            );
+        }
+        DebuggerConsole.addEntry(
+            'info',
+            `   Branch: ${branch}`,
+            'git'
+        );
+        DebuggerConsole.addEntry(
+            'info',
+            `   Message: ${message}`,
+            'git'
+        );
+        DebuggerConsole.addEntry(
+            'info',
+            `Running git operations in backend...`,
+            'git'
+        );
     }
 
     try {
-        // Call the backend API with the branch, message, and the optional target repo
         const res = await fetch(API.pr, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: relPath, branch, message, target_repo: repoUrl }),
+
+            body: JSON.stringify({
+                path: relPath,
+                branch,
+                message,
+                target_repo: repoUrl
+            }),
         });
         const data = await res.json();
 
         if (data.success) {
             if (typeof DebuggerConsole !== 'undefined') {
-                DebuggerConsole.addEntry('log', `✨ Git operation successful!`, 'git');
-                DebuggerConsole.addEntry('log', `🔗 PR Link: ${data.pr_url}`, 'git');
+                DebuggerConsole.addEntry(
+                    'log',
+                    `✨ Git operation successful!`,
+                    'git'
+                );
+                DebuggerConsole.addEntry(
+                    'log',
+                    `🔗 PR Link: ${data.pr_url}`,
+                    'git'
+                );
             }
-            appendToCli(`✓ Git PR branch '${data.branch}' created and pushed.`, 'success');
-
-            // Offer to automatically open the GitHub Pull Request page
-            if (confirm(`Successfully pushed to branch '${data.branch}'.\n\nWould you like to open the Pull Request page on GitHub?`)) {
+            appendToCli(
+                `✓ Git PR branch '${data.branch}' created and pushed.`,
+                'success'
+            );
+            notify(
+                'PR workflow completed successfully.',
+                'success'
+            );
+            // Offer PR page opening
+            if (
+                confirm(
+                    `Successfully pushed to branch '${data.branch}'.\n\nWould you like to open the Pull Request page on GitHub?`
+                )
+            ) {
                 window.open(data.pr_url, '_blank');
             }
         } else {
-            if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `❌ Git PR failed: ${data.error}`, 'git');
-            notify(`PR workflow failed: ${data.error}`, 'error');
+            if (typeof DebuggerConsole !== 'undefined') {
+                DebuggerConsole.addEntry(
+                    'error',
+                    `❌ Git PR failed: ${data.error}`,
+                    'git'
+                );
+            }
+            notify(
+                `PR workflow failed: ${data.error}`,
+                'error'
+            );
         }
     } catch (err) {
-        if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `❌ Git PR Exception: ${err.message}`, 'git');
-        notify(`Exception during PR workflow: ${err.message}`, 'error');
+        if (typeof DebuggerConsole !== 'undefined') {
+            DebuggerConsole.addEntry(
+                'error',
+                `❌ Git PR Exception: ${err.message}`,
+                'git'
+            );
+        }
+        notify(
+            `Exception during PR workflow: ${err.message}`,
+            'error'
+        );
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Push / Raise PR';
+        }
     }
 }
-
 async function manageLock(relPath, oldPass, newPass) {
     try {
         const res = await fetch(API.lock, {
@@ -674,6 +884,123 @@ async function manageLock(relPath, oldPass, newPass) {
     }
 }
 
+/* ─── Replay Engine ───────────────────────── */
+
+async function openReplay(sessionId) {
+    try {
+        const res = await fetch(`/api/history/session/${sessionId}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+            notify(data.error || 'Failed to load replay session.', 'error');
+            return;
+        }
+
+        state.replay.events = data.events || [];
+        state.replay.index = 0;
+        state.replay.playing = true;
+
+        const overlay = document.getElementById('replay-modal-overlay');
+        const terminal = document.getElementById('replay-terminal');
+        const metadata = document.getElementById('replay-metadata');
+
+        terminal.innerHTML = '';
+
+        metadata.innerHTML = `
+            <strong>${escapeHtml(data.metadata.display_name)}</strong>
+            · ${escapeHtml(data.metadata.status)}
+            · Exit ${data.metadata.exit_code}
+            · ${data.metadata.duration_seconds}s
+        `;
+
+        overlay.classList.add('active');
+
+        playReplay();
+    } catch (err) {
+        console.error(err);
+
+        notify(
+            `Replay failed: ${err.message}`,
+            'error'
+        );
+    }
+}
+
+function playReplay() {
+    clearTimeout(state.replay.timer);
+
+    if (!state.replay.playing) {
+        return;
+    }
+
+    const terminal = document.getElementById('replay-terminal');
+
+    if (state.replay.index >= state.replay.events.length) {
+        return;
+    }
+
+    const event = state.replay.events[state.replay.index];
+
+    const line = document.createElement('div');
+
+    line.className = `replay-line ${event.stream}`;
+
+    line.textContent = event.content;
+
+    terminal.appendChild(line);
+
+    terminal.scrollTop = terminal.scrollHeight;
+
+    state.replay.index++;
+
+    const nextEvent = state.replay.events[state.replay.index];
+
+    let delay = 50;
+
+    if (nextEvent) {
+        delay = Math.max(
+            10,
+            (nextEvent.timestamp - event.timestamp) * 1000
+        );
+    }
+
+    delay /= state.replay.speed;
+
+    state.replay.timer = setTimeout(
+        playReplay,
+        delay
+    );
+}
+
+function toggleReplayPlayback() {
+    state.replay.playing = !state.replay.playing;
+
+    document.getElementById('replay-play-pause').textContent =
+        state.replay.playing
+            ? 'Pause'
+            : 'Play';
+
+    if (state.replay.playing) {
+        playReplay();
+    }
+}
+
+function restartReplay() {
+    clearTimeout(state.replay.timer);
+    state.replay.index = 0;
+    state.replay.playing = true;
+    document.getElementById('replay-terminal').innerHTML = '';
+    document.getElementById('replay-play-pause').textContent = 'Pause';
+    playReplay();
+}
+
+function closeReplay() {
+    clearTimeout(state.replay.timer);
+
+    document
+        .getElementById('replay-modal-overlay')
+        .classList.remove('active');
+}
 
 // ─── CLI Helpers ───
 
@@ -1576,6 +1903,26 @@ function bindEvents() {
         document.getElementById('lock-modal-cancel').addEventListener('click', closeLock);
         lockOverlay.addEventListener('click', (e) => { if (e.target.id === 'lock-modal-overlay') closeLock(); });
 
+        /* ─── Replay Controls ───────────────────── */
+
+        document
+            .getElementById('replay-play-pause')
+            ?.addEventListener('click', toggleReplayPlayback);
+
+        document
+            .getElementById('replay-close')
+            ?.addEventListener('click', closeReplay);
+
+        document
+            .getElementById('replay-speed')
+            ?.addEventListener('change', (e) => {
+                state.replay.speed = parseFloat(e.target.value) || 1;
+            });
+
+        document
+            .getElementById('replay-restart')
+            ?.addEventListener('click', restartReplay);
+
         document.getElementById('lock-modal-save').addEventListener('click', async () => {
             let isLocked = false;
             for (let cat in state.scripts) {
@@ -1614,6 +1961,18 @@ function bindEvents() {
             }
         });
     }
+
+    document
+        .getElementById('btn-analytics')
+        ?.addEventListener('click', openAnalytics);
+
+    document
+        .getElementById('analytics-close')
+        ?.addEventListener('click', () => {
+            document
+                .getElementById('analytics-modal-overlay')
+                .classList.remove('active');
+        });
 }
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -2021,6 +2380,39 @@ const DebuggerConsole = (() => {
         });
         document.addEventListener('mouseup', () => { if (resizing) { resizing = false; document.body.style.cursor = ''; } });
     }
+
+document.addEventListener('keydown', (e) => {
+    // Ctrl+K → Search
+    if (e.ctrlKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+
+        const search = document.getElementById('search-input');
+
+        if (search) {
+            search.focus();
+        }
+    }
+
+    // Escape → Close modals
+    if (e.key === 'Escape') {
+        document
+            .querySelectorAll('.modal-overlay.active')
+            .forEach(modal => {
+                modal.classList.remove('active');
+            });
+    }
+
+    // Ctrl+Enter → Run Script
+    if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+
+        const runBtn = document.getElementById('btn-run');
+
+        if (runBtn) {
+            runBtn.click();
+        }
+    }
+});
 
     function init() {
         interceptConsole();
