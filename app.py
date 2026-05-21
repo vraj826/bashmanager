@@ -3,6 +3,7 @@ import os
 import json
 import time
 import subprocess
+import tempfile
 import threading
 import queue
 import uuid
@@ -921,6 +922,50 @@ def _track_metrics(proc, result):
     result['mem'] = round(max_mem_mb, 1)
 
 
+def _escape_bash_echo(text):
+    # Escape backslashes first, then other bash special characters in double quotes
+    escaped = text.replace('\\', '\\\\')
+    escaped = escaped.replace('"', '\\"')
+    escaped = escaped.replace('$', '\\$')
+    escaped = escaped.replace('`', '\\`')
+    return escaped
+
+
+def instrument_script(content):
+    lines = content.splitlines()
+    instrumented_lines = []
+    steps = []
+    
+    # First pass: find all executable steps
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith('#'):
+            continue
+        steps.append(stripped)
+        
+    total_steps = len(steps)
+    
+    # Second pass: inject progress calls
+    step_idx = 0
+    for line in lines:
+        stripped = line.strip()
+        
+        is_step = False
+        if stripped and not stripped.startswith('#'):
+            is_step = True
+                
+        if is_step:
+            step_idx += 1
+            # Clean command display for security and readability
+            cmd_display = stripped.split('#')[0].strip()
+            cmd_escaped = _escape_bash_echo(cmd_display)
+            instrumented_lines.append(f'echo "::progress::{step_idx}::{total_steps}::{cmd_escaped}"')
+            
+        instrumented_lines.append(line)
+        
+    return '\n'.join(instrumented_lines), steps
 def _terminate_process_tree(proc, timeout=3):
     if proc.poll() is not None:
         return
@@ -990,9 +1035,40 @@ def run_script():
 
     def generate():
         proc = None
+        run_path = full_path
         start_time = time.time()
-        try:
-            args = [shell_cmd, full_path] if shell_cmd != 'cmd.exe' else ['cmd.exe', '/c', full_path]
+                try:
+            # Instrument script content for progress tracking
+            try:
+                with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+
+                instrumented_content, steps = instrument_script(content)
+
+                if steps:
+                    temp_dir = os.path.dirname(full_path)
+                    temp_fd, temp_path = tempfile.mkstemp(
+                        suffix='.sh',
+                        prefix='.tmp_run_',
+                        dir=temp_dir
+                    )
+                    with os.fdopen(temp_fd, 'w', encoding='utf-8', newline='\n') as temp_f:
+                        temp_f.write(instrumented_content)
+                    
+                    run_path = temp_path
+                else:
+                    run_path = full_path
+
+            except Exception:
+                run_path = full_path
+
+            # Use main's Windows support with your run_path
+            args = (
+                [shell_cmd, run_path]
+                if shell_cmd != 'cmd.exe'
+                else ['cmd.exe', '/c', run_path]
+            )
+
             proc = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
@@ -1021,6 +1097,22 @@ def run_script():
 
             for line in iter(proc.stdout.readline, ''):
                 if line:
+                    if run_path != full_path:
+                        temp_basename = os.path.basename(run_path)
+                        orig_basename = os.path.basename(full_path)
+                        if temp_basename in line:
+                            line = line.replace(temp_basename, orig_basename)
+
+                    if '::progress::' in line:
+                        match = re.search(r'::progress::(\d+)::(\d+)::(.*)', line)
+                        if match:
+                            step_idx = int(match.group(1))
+                            total_steps = int(match.group(2))
+                            cmd_text = match.group(3).strip()
+                            yield f"data: {json.dumps({'type': 'progress', 'step': step_idx, 'total': total_steps, 'command': cmd_text})}\n\n"
+                            continue
+
+                    # Heuristic to detect errors in the combined stream
                     l_lower = line.lower()
                     msg_type = 'stdout'
                     if any(err in l_lower for err in ['error:', 'failed:', 'not found', 'denied', 'no such file']):
@@ -1119,6 +1211,12 @@ def run_script():
             )
             yield f"data: {json.dumps({'type': 'error', 'content': f'❌ Execution Error: {str(e)}'})}\n\n"
         finally:
+            if 'run_path' in locals() and run_path != full_path:
+                try:
+                    if os.path.exists(run_path):
+                        os.remove(run_path)
+                except Exception:
+                    pass
             with active_processes_lock:
                 if run_id in active_processes:
                     del active_processes[run_id]

@@ -2195,6 +2195,100 @@ body.debugger-open #app-main {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
 }
+
+/* ─── Progress Tracker Panel ───────────────────────────── */
+.progress-tracker-panel {
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.progress-tracker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.progress-tracker-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.progress-tracker-step {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+}
+
+.progress-bar-container {
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+    width: 100%;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.2s ease;
+}
+
+.progress-tracker-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+}
+
+.progress-tracker-command {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    padding: 1px 6px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 70%;
+}
+
+.progress-tracker-status {
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.progress-tracker-status::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
+.progress-tracker-status.running::before {
+    background: var(--accent-orange);
+}
+
+.progress-tracker-status.success::before {
+    background: var(--accent);
+}
+
+.progress-tracker-status.failed::before {D
+    background: var(--accent-red);
+}
 /* ─── Workspace Recovery ───────────────── */
 
 .workspace-recovery-actions {

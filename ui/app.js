@@ -56,7 +56,7 @@ let state = {
     workspaceRecoveryEnabled: true,
     sessionId: null,
     lastSaveTimestamp: 0,
-    runningScripts: {},   // { termId: { run_id } }
+    runningScripts: {},  // termId -> { step, total, command, status }
 };
 
 const RUN_BUTTON_IDLE_HTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Run</span>`;
@@ -334,6 +334,17 @@ async function runScript(relPath) {
     appendToCli(`$ Running script: ${relPath}`, 'system', termId);
     if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('info', `▶ Running script: ${relPath}`, 'script');
 
+    // Initialize progress tracker state for this terminal
+    state.runningScripts[termId] = {
+        step: 0,
+        total: 0,
+        command: 'Starting script...',
+        status: 'running'
+    };
+    if (termId === state.activeTerminalId) {
+        updateProgressTrackerUI();
+    }
+
     try {
         const res = await fetch(API.run, {
             method: 'POST',
@@ -347,6 +358,16 @@ async function runScript(relPath) {
             if (termId === state.activeTerminalId) {
                 runStatus.textContent = 'Locked';
                 runStatus.className = 'run-status error';
+            }
+            if (state.runningScripts[termId]) {
+                state.runningScripts[termId].status = 'failed';
+                if (termId === state.activeTerminalId) updateProgressTrackerUI();
+                setTimeout(() => {
+                    if (state.runningScripts[termId] && state.runningScripts[termId].status === 'failed') {
+                        state.runningScripts[termId].status = 'idle';
+                        if (state.activeTerminalId === termId) updateProgressTrackerUI();
+                    }
+                }, 5000);
             }
             return;
         }
@@ -395,14 +416,24 @@ async function runScript(relPath) {
                                 const dbgType = data.type === 'error' ? 'error' : 'log';
                                 DebuggerConsole.addEntry(dbgType, data.content.trimEnd(), relPath);
                             }
-                        } else if (data.type === 'aborted') {
-                            appendToCli(data.content, 'error', termId);
-                            if (typeof DebuggerConsole !== 'undefined') {
-                                DebuggerConsole.addEntry('error', `⏹ Script aborted (ID: ${data.run_id})`, 'script');
-                            }
-                            if (termId === state.activeTerminalId) {
-                                runStatus.textContent = 'Aborted';
-                                runStatus.className = 'run-status error';
+            } else if (data.type === 'progress') {
+                state.runningScripts[termId] = {
+                    step: data.step,
+                    total: data.total,
+                    command: data.command,
+                    status: 'running'
+                };
+                if (termId === state.activeTerminalId) {
+                    updateProgressTrackerUI();
+                }
+            } else if (data.type === 'aborted') {
+                appendToCli(data.content, 'error', termId);
+                if (typeof DebuggerConsole !== 'undefined') {
+                    DebuggerConsole.addEntry('error', `Script aborted (ID: ${data.run_id})`, 'script');
+                }
+                if (termId === state.activeTerminalId) {
+                    runStatus.textContent = 'Aborted';
+                    runStatus.className = 'run-status error';
                             }
                         } else if (data.type === 'metrics') {
                             if (data.success) {
@@ -414,6 +445,19 @@ async function runScript(relPath) {
                                     runStatus.textContent = 'Success';
                                     runStatus.className = 'run-status success';
                                 }
+                                if (state.runningScripts[termId]) {
+                                    state.runningScripts[termId].status = 'success';
+                                    if (state.runningScripts[termId].total > 0) {
+                                        state.runningScripts[termId].step = state.runningScripts[termId].total;
+                                    }
+                                    if (termId === state.activeTerminalId) updateProgressTrackerUI();
+                                    setTimeout(() => {
+                                        if (state.runningScripts[termId] && state.runningScripts[termId].status === 'success') {
+                                            state.runningScripts[termId].status = 'idle';
+                                            if (state.activeTerminalId === termId) updateProgressTrackerUI();
+                                        }
+                                    }, 3000);
+                                }
                             } else {
                                 appendToCli(`Script failed (Exit code: ${data.exit_code})`, 'error', termId);
                                 if (typeof DebuggerConsole !== 'undefined') {
@@ -422,6 +466,16 @@ async function runScript(relPath) {
                                 if (termId === state.activeTerminalId) {
                                     runStatus.textContent = 'Failed';
                                     runStatus.className = 'run-status error';
+                                }
+                                if (state.runningScripts[termId]) {
+                                    state.runningScripts[termId].status = 'failed';
+                                    if (termId === state.activeTerminalId) updateProgressTrackerUI();
+                                    setTimeout(() => {
+                                        if (state.runningScripts[termId] && state.runningScripts[termId].status === 'failed') {
+                                            state.runningScripts[termId].status = 'idle';
+                                            if (state.activeTerminalId === termId) updateProgressTrackerUI();
+                                        }
+                                    }, 5000);
                                 }
                             }
 
@@ -445,6 +499,16 @@ async function runScript(relPath) {
                 runStatus.textContent = 'Error';
                 runStatus.className = 'run-status error';
             }
+        }
+        if (state.runningScripts[termId]) {
+            state.runningScripts[termId].status = 'failed';
+            if (termId === state.activeTerminalId) updateProgressTrackerUI();
+            setTimeout(() => {
+                if (state.runningScripts[termId] && state.runningScripts[termId].status === 'failed') {
+                    state.runningScripts[termId].status = 'idle';
+                    if (state.activeTerminalId === termId) updateProgressTrackerUI();
+                }
+            }, 5000);
         }
     } finally {
         refreshExecutionHistoryIfVisible();
@@ -1115,6 +1179,46 @@ function closeReplay() {
         .classList.remove('active');
 }
 
+function updateProgressTrackerUI() {
+    const panel = document.getElementById('progress-tracker-panel');
+    if (!panel) return;
+
+    const termId = state.activeTerminalId;
+    const progress = state.runningScripts[termId];
+
+    if (!progress || progress.status === 'idle') {
+        panel.style.display = 'none';
+        return;
+    }
+
+    panel.style.display = 'flex';
+
+    const stepEl = document.getElementById('progress-tracker-step');
+    const fillEl = document.getElementById('progress-bar-fill');
+    const cmdEl = document.getElementById('progress-tracker-command');
+    const statusEl = document.getElementById('progress-tracker-status');
+
+    stepEl.textContent = `Step ${progress.step}/${progress.total}`;
+    
+    const pct = progress.total > 0 ? (progress.step / progress.total) * 100 : 0;
+    fillEl.style.width = `${pct}%`;
+    
+    cmdEl.textContent = progress.command || 'Running...';
+    cmdEl.title = progress.command || '';
+    
+    // Status text & class
+    let statusText = 'Idle';
+    if (progress.status === 'running') {
+        statusText = '🔄 Running';
+    } else if (progress.status === 'success') {
+        statusText = '✅ Success';
+    } else if (progress.status === 'failed') {
+        statusText = '❌ Failed';
+    }
+    statusEl.textContent = `Status: ${statusText}`;
+    statusEl.className = `progress-tracker-status ${progress.status}`;
+}
+
 // ─── CLI Helpers ───
 
 function appendToCli(text, className = '', termId = state.activeTerminalId) {
@@ -1142,6 +1246,11 @@ function clearCli() {
     document.getElementById('run-status').textContent = '';
     document.getElementById('run-status').className = 'run-status';
     document.getElementById('resource-panel').style.display = 'none';
+
+    if (state.runningScripts && state.runningScripts[state.activeTerminalId] && state.runningScripts[state.activeTerminalId].status !== 'running') {
+        state.runningScripts[state.activeTerminalId].status = 'idle';
+        updateProgressTrackerUI();
+    }
 }
 
 
@@ -1408,7 +1517,10 @@ function switchTerminal(id) {
     }
     updateRunButton();
     highlightTerminalSearch();
+
+    updateProgressTrackerUI();
     persistWorkspace();
+
 }
 
 function closeTerminal(id) {
@@ -1421,8 +1533,14 @@ function closeTerminal(id) {
     const bodyContainer = getTerminalBody(id);
     if (bodyContainer) bodyContainer.remove();
 
+    if (state.runningScripts && state.runningScripts[id]) {
+        delete state.runningScripts[id];
+    }
+
     if (state.activeTerminalId === id) {
         switchTerminal(state.terminals[state.terminals.length - 1]);
+    } else {
+        updateProgressTrackerUI();
     }
     persistWorkspace();
     saveSessionDebounced();

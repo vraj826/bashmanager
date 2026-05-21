@@ -192,6 +192,20 @@
                         </button>
                     </div>
                 </div>
+                <!-- Progress Tracker Panel -->
+                <div id="progress-tracker-panel" class="progress-tracker-panel" style="display: none;">
+                    <div class="progress-tracker-header">
+                        <span class="progress-tracker-title">Execution Progress</span>
+                        <span id="progress-tracker-step" class="progress-tracker-step">Step 0/0</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+                    </div>
+                    <div class="progress-tracker-footer">
+                        <span id="progress-tracker-command" class="progress-tracker-command">Waiting...</span>
+                        <span id="progress-tracker-status" class="progress-tracker-status">Status: Idle</span>
+                    </div>
+                </div>
                 <div class="cli-body" id="terminal-body" role="log" aria-live="polite">
                     <div class="cli-welcome">
                         <span class="cli-prompt">$</span> <span class="cli-welcome-text">Welcome to DevShell. Select a
