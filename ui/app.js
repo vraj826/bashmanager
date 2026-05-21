@@ -1772,13 +1772,14 @@ function closeModal() {
 }
 
 // ─── Event Bindings ────────────────────────────────────────
-
 function bindEvents() {
     // Terminal Search
     const cliSearchInput = document.getElementById('cli-search-input');
     if (cliSearchInput) {
         cliSearchInput.addEventListener('input', () => highlightTerminalSearch());
     }
+
+    // ─── THEME TOGGLE ENGINE LAYER ───
     const themeToggleBtn = document.getElementById('theme-toggle-btn');
     const moonIcon = document.getElementById('theme-icon-moon');
     const sunIcon = document.getElementById('theme-icon-sun');
@@ -1807,6 +1808,39 @@ function bindEvents() {
                 if (moonIcon) moonIcon.style.display = 'none';
                 if (sunIcon) sunIcon.style.display = 'block';
             }
+        });
+    }
+
+    // Real-Time Sidebar Script Filter Logic (Fixed Variant)
+    const scriptSearchBar = document.getElementById('script-search-bar');
+    if (scriptSearchBar) {
+        scriptSearchBar.addEventListener('input', (e) => {
+            const filterText = e.target.value.toLowerCase().trim();
+            const scriptItems = document.querySelectorAll('#category-tree .script-item');
+            
+            scriptItems.forEach(item => {
+                const scriptNameEl = item.querySelector('.script-item-name');
+                if (!scriptNameEl) return;
+                
+                const scriptName = scriptNameEl.textContent.toLowerCase();
+                
+                if (scriptName.includes(filterText)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+
+            // Handle category auto-expansion smoothly without resetting terminal CSS
+            const categoryLists = document.querySelectorAll('#category-tree .script-list');
+            categoryLists.forEach(list => {
+                if (filterText !== '') {
+                    list.style.maxHeight = 'none';
+                    list.classList.remove('collapsed');
+                } else {
+                    list.style.maxHeight = '';
+                }
+            });
         });
     }
 
