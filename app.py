@@ -9,12 +9,18 @@ import queue
 import uuid
 import psutil
 import hashlib
+import hmac
+import secrets
+import binascii
 import urllib.request
 import urllib.parse
 import re
 import shutil
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, send_from_directory, Response
+
+PBKDF2_ITERATIONS = 100_000
+
 
 app = Flask(__name__, static_folder='ui', static_url_path='')
 
@@ -2165,14 +2171,98 @@ def save_sessions(sessions):
         json.dump(sessions, f, indent=2)
 
 
-def check_lock(rel_path, provided_pass):
+def is_legacy_hash(data: any) -> bool:
+    """Check if the stored lock data is a legacy SHA-256 string."""
+    return isinstance(data, str)
+
+
+def generate_password_hash(password: str) -> dict:
+    """Generate a secure PBKDF2-HMAC-SHA256 hash dictionary for a password with a random salt."""
+    if not isinstance(password, str):
+        raise TypeError("Password must be a string")
+    
+    salt_bytes = secrets.token_bytes(16)
+    salt_hex = salt_bytes.hex()
+    
+    hash_bytes = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt_bytes,
+        PBKDF2_ITERATIONS
+    )
+    hash_hex = hash_bytes.hex()
+    
+    return {
+        "salt": salt_hex,
+        "hash": hash_hex,
+        "iterations": PBKDF2_ITERATIONS
+    }
+
+
+def verify_password(password: str, stored_data: dict) -> bool:
+    """Verify a password against stored PBKDF2 metadata safely, with exception handling."""
+    if not isinstance(password, str):
+        return False
+    if not isinstance(stored_data, dict):
+        return False
+    
+    try:
+        salt_hex = stored_data.get("salt")
+        hash_hex = stored_data.get("hash")
+        iterations = stored_data.get("iterations")
+        
+        if not salt_hex or not isinstance(salt_hex, str):
+            return False
+        if not hash_hex or not isinstance(hash_hex, str):
+            return False
+        if iterations is None or not isinstance(iterations, int) or iterations <= 0:
+            return False
+            
+        try:
+            salt_bytes = bytes.fromhex(salt_hex)
+            hash_bytes = bytes.fromhex(hash_hex)
+        except (ValueError, binascii.Error, TypeError):
+            return False
+            
+        calculated_hash = hashlib.pbkdf2_hmac(
+            'sha256',
+            password.encode('utf-8'),
+            salt_bytes,
+            iterations
+        )
+        
+        return hmac.compare_digest(calculated_hash, hash_bytes)
+    except Exception:
+        return False
+
+
+def check_lock(rel_path: str, provided_pass: str) -> bool:
+    """Check if a script is locked and if the provided password matches."""
     locks = load_locks()
     if rel_path in locks:
         if not provided_pass:
             return False
-        if hashlib.sha256(provided_pass.encode()).hexdigest() != locks[rel_path]:
+            
+        stored_data = locks[rel_path]
+        
+        if is_legacy_hash(stored_data):
+            legacy_hash = hashlib.sha256(provided_pass.encode('utf-8')).hexdigest()
+            if hmac.compare_digest(legacy_hash, stored_data):
+                try:
+                    new_hash = generate_password_hash(provided_pass)
+                    locks[rel_path] = new_hash
+                    save_locks(locks)
+                except Exception:
+                    pass
+                return True
             return False
+        elif isinstance(stored_data, dict):
+            return verify_password(provided_pass, stored_data)
+        else:
+            return False
+            
     return True
+
 
 def is_safe_path(base_dir, target_path):
     base_dir = os.path.abspath(base_dir)
@@ -3305,7 +3395,7 @@ def manage_lock():
         
     locks = load_locks()
     if new_pass:
-        locks[rel_path] = hashlib.sha256(new_pass.encode()).hexdigest()
+        locks[rel_path] = generate_password_hash(new_pass)
     else:
         if rel_path in locks:
             del locks[rel_path]
@@ -3547,7 +3637,34 @@ def _format_time(seconds):
 
 # ─── Main ─────────────────────────────────────────────────────────
 
+DEFAULT_PORT = 5000
+
+
+def _server_port() -> int:
+    raw = os.environ.get("DEVSHELL_PORT", "").strip()
+    if not raw:
+        return DEFAULT_PORT
+    try:
+        port = int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"Invalid DEVSHELL_PORT: {raw!r} (must be integer 1-65535)"
+        )
+    if not (1 <= port <= 65535):
+        raise SystemExit(
+            f"Invalid DEVSHELL_PORT: {raw!r} (must be integer 1-65535)"
+        )
+    return port
+
+
 if __name__ == '__main__':
-    print("[*] DevShell starting on http://localhost:5000")
+    port = _server_port()
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    print(f"[*] DevShell starting on http://127.0.0.1:{port}")
     print(f"[*] Scripts directory: {SCRIPTS_DIR}")
-    app.run(debug=True, port=5000)
+    app.run(
+        debug=debug,
+        host="127.0.0.1",
+        port=port,
+        use_reloader=False,
+    )
