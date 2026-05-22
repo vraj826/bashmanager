@@ -46,7 +46,7 @@ let state = {
         index: 0,
         speed: 1
     },
-    unlockedScripts: {}, // stores valid passwords for locked scripts: { "path": "pass" }
+    unlockedScripts: {}, // unlock flags only: { "path": true }
     terminals: [1],      // list of terminal IDs
     activeTerminalId: 1,
     nextTerminalId: 2,
@@ -59,6 +59,42 @@ let state = {
     lastSaveTimestamp: 0,
     runningScripts: {},  // termId -> { step, total, command, status }
 };
+
+const unlockCredentials = new Map();
+
+function isScriptUnlocked(relPath) {
+    return !!state.unlockedScripts[relPath];
+}
+
+function getUnlockPassword(relPath) {
+    return unlockCredentials.get(relPath) || '';
+}
+
+function markScriptUnlocked(relPath, password) {
+    state.unlockedScripts[relPath] = true;
+    if (password) unlockCredentials.set(relPath, password);
+}
+
+function clearScriptUnlock(relPath) {
+    delete state.unlockedScripts[relPath];
+    unlockCredentials.delete(relPath);
+}
+
+function serializeUnlockedScripts() {
+    const out = {};
+    for (const path of Object.keys(state.unlockedScripts)) {
+        if (state.unlockedScripts[path]) out[path] = true;
+    }
+    return out;
+}
+
+function restoreUnlockedScripts(raw = {}) {
+    state.unlockedScripts = {};
+    for (const [path, val] of Object.entries(raw)) {
+        if (val) state.unlockedScripts[path] = true;
+    }
+    unlockCredentials.clear();
+}
 
 const RUN_BUTTON_IDLE_HTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Run</span>`;
 
@@ -417,7 +453,7 @@ async function runScript(relPath) {
         const res = await fetch(API.run, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: relPath, password: state.unlockedScripts[relPath] || '' }),
+            body: JSON.stringify({ path: relPath, password: getUnlockPassword(relPath) }),
             signal: controller.signal
         });
 
@@ -830,7 +866,7 @@ async function saveScript(category, filename, content) {
                 category,
                 filename,
                 content,
-                password: state.unlockedScripts[relPath] || ''
+                password: getUnlockPassword(relPath)
             }),
         });
         const data = await res.json();
@@ -866,7 +902,7 @@ async function deleteScript(relPath) {
         const res = await fetch(API.delete, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: relPath, password: state.unlockedScripts[relPath] || '' })
+            body: JSON.stringify({ path: relPath, password: getUnlockPassword(relPath) })
         });
         const data = await res.json();
         if (res.status === 401) {
@@ -1140,9 +1176,9 @@ async function manageLock(relPath, oldPass, newPass) {
         }
 
         if (data.locked) {
-            state.unlockedScripts[relPath] = newPass; // update session cache
+            markScriptUnlocked(relPath, newPass);
         } else {
-            delete state.unlockedScripts[relPath]; // unlocked completely
+            clearScriptUnlock(relPath);
         }
 
         await loadScripts();
@@ -1391,7 +1427,7 @@ async function saveSession() {
         cmdHistory: state.cmdHistory,
         cmdHistoryIndex: state.cmdHistoryIndex,
 
-        unlockedScripts: state.unlockedScripts
+        unlockedScripts: serializeUnlockedScripts()
     };
 
     try {
@@ -1427,7 +1463,7 @@ function generateUUID() {
 }
 
 
-let saveSessionTimeout = null;
+// let saveSessionTimeout = null;
 
 function saveSessionDebounced() {
     if (saveSessionTimeout) {
@@ -1468,8 +1504,7 @@ async function restoreSession() {
         state.cmdHistoryIndex =
             session.cmdHistoryIndex || -1;
 
-        state.unlockedScripts =
-            session.unlockedScripts || {};
+        restoreUnlockedScripts(session.unlockedScripts);
 
         const existingTabs =
             document.querySelectorAll('.cli-tab');
@@ -1652,7 +1687,13 @@ function updateAutoScrollBtn(termId, isOn) {
     btn.classList.toggle('active', isOn);
     btn.title = isOn ? 'Auto-scroll: On' : 'Auto-scroll: Off';
     btn.setAttribute('aria-pressed', String(isOn));
-    termBody.scrollTop = termBody.scrollHeight;
+    const termBody =
+        document.getElementById(`terminal-body-${termId}`) ||
+        document.getElementById('terminal-body');
+
+    if (termBody) {
+        termBody.scrollTop = termBody.scrollHeight;
+    }    
     highlightTerminalSearch();
     persistWorkspace();
 }
@@ -1672,6 +1713,207 @@ function clearCli() {
     }
 }
 
+// ─── Session Persistence ──────────────────────────────────
+
+async function saveSession() {
+    const sessionData = {
+        sessionId: state.sessionId || generateUUID(),
+        timestamp: Date.now(),
+
+        terminals: state.terminals.map(id => {
+            const body =
+                document.getElementById(`terminal-body-${id}`) ||
+                (id === 1
+                    ? document.getElementById('terminal-body')
+                    : null);
+
+            if (!body) return null;
+
+            const lines = Array.from(
+                body.querySelectorAll('.cli-output-block')
+            )
+                .slice(-100)
+                .map(el => ({
+                    text: el.textContent,
+                    className: el.className.replace(
+                        'cli-output-block ',
+                        ''
+                    )
+                }));
+
+            return {
+                id,
+                lines
+            };
+        }).filter(t => t !== null),
+
+        activeTerminalId: state.activeTerminalId,
+        nextTerminalId: state.nextTerminalId,
+
+        cmdHistory: state.cmdHistory,
+        cmdHistoryIndex: state.cmdHistoryIndex,
+
+        unlockedScripts: serializeUnlockedScripts()
+    };
+
+    try {
+        await fetch('/api/sessions/save', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                session: sessionData
+            })
+        });
+
+        state.sessionId = sessionData.sessionId;
+        state.lastSaveTimestamp = Date.now();
+
+    } catch (e) {
+        console.error('Failed to save session:', e);
+    }
+}
+
+
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
+        .replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x'
+                ? r
+                : (r & 0x3 | 0x8);
+
+            return v.toString(16);
+        });
+}
+
+
+let saveSessionTimeout = null;
+
+function saveSessionDebounced() {
+    if (saveSessionTimeout) {
+        clearTimeout(saveSessionTimeout);
+    }
+
+    saveSessionTimeout = setTimeout(() => {
+        saveSession();
+    }, 2000);
+}
+
+
+async function restoreSession() {
+    try {
+        const res = await fetch('/api/sessions/restore');
+        const data = await res.json();
+
+        if (!data.success || !data.session) {
+            return;
+        }
+
+        const session = data.session;
+
+        state.sessionId = session.sessionId || null;
+
+        const terminalIds = session.terminals?.map(t => t.id);
+        state.terminals = terminalIds?.length ? terminalIds : [1];
+
+        state.activeTerminalId =
+            session.activeTerminalId || 1;
+
+        state.nextTerminalId =
+            Math.max(...state.terminals) + 1;
+
+        state.cmdHistory =
+            session.cmdHistory || [];
+
+        state.cmdHistoryIndex =
+            session.cmdHistoryIndex || -1;
+
+        restoreUnlockedScripts(session.unlockedScripts);
+
+        const existingTabs =
+            document.querySelectorAll('.cli-tab');
+
+        existingTabs.forEach(tab => {
+            if (tab.id !== 'tab-btn-1') {
+                tab.remove();
+            }
+        });
+
+        const existingBodies =
+            document.querySelectorAll('.cli-body');
+
+        existingBodies.forEach(body => {
+            if (body.id !== 'terminal-body') {
+                body.remove();
+            }
+        });
+
+        for (const term of session.terminals || []) {
+
+            if (term.id !== 1) {
+                // Create terminal DOM directly with the saved ID
+                // instead of calling addTerminal() which would
+                // corrupt state.nextTerminalId and state.terminals
+                const tabsContainer = document.getElementById('cli-tabs');
+                const tabBtn = document.createElement('div');
+                tabBtn.className = 'cli-tab';
+                tabBtn.id = `tab-btn-${term.id}`;
+                tabBtn.innerHTML = `
+                    <span class="cli-dots" style="margin-right: 6px;">
+                        <span class="dot dot-red"></span>
+                        <span class="dot dot-yellow"></span>
+                        <span class="dot dot-green"></span>
+                    </span>
+                    <span>Terminal ${term.id}</span>
+                    <button class="cli-tab-close" title="Close" aria-label="Close terminal" onclick="event.stopPropagation(); closeTerminal(${term.id})"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>`;
+                tabBtn.onclick = () => switchTerminal(term.id);
+                tabsContainer.insertBefore(tabBtn, document.getElementById('btn-add-tab'));
+
+                const bodyContainer = document.createElement('div');
+                bodyContainer.className = 'cli-body';
+                bodyContainer.setAttribute('role', 'log');
+                bodyContainer.setAttribute('aria-live', 'polite');
+                bodyContainer.id = `terminal-body-${term.id}`;
+                bodyContainer.style.display = 'none';
+
+                document.getElementById('cli-area').insertBefore(
+                    bodyContainer,
+                    document.querySelector('.cli-input-bar')
+                );
+            }
+
+            const body =
+                document.getElementById(`terminal-body-${term.id}`) ||
+                (term.id === 1
+                    ? document.getElementById('terminal-body')
+                    : null);
+
+            if (!body) continue;
+
+            body.innerHTML = '';
+
+            for (const line of term.lines || []) {
+                const div = document.createElement('div');
+
+                div.className =
+                    `cli-output-block ${line.className}`;
+
+                div.textContent = line.text;
+
+                body.appendChild(div);
+            }
+        }
+
+        switchTerminal(state.activeTerminalId);
+
+        console.log('Session restored successfully');
+
+    } catch (e) {
+        console.error('Failed to restore session:', e);
+    }
+}
 
 // ─── Terminal Tabs ───
 
@@ -1961,7 +2203,7 @@ async function selectScript(relPath) {
     welcomePanel.style.display = 'none';
 
     // Handle locked state
-    if (script.locked && !state.unlockedScripts[relPath]) {
+    if (script.locked && (!isScriptUnlocked(relPath) || !unlockCredentials.has(relPath))) {
         detailPanel.style.display = 'none';
         lockedPanel.style.display = '';
 
@@ -1979,7 +2221,8 @@ async function selectScript(relPath) {
             if (content.locked) {
                 notify('Incorrect password.', 'error');
             } else {
-                state.unlockedScripts[relPath] = passInput.value;
+                markScriptUnlocked(relPath, passInput.value);
+                passInput.value = '';
                 selectScript(relPath);
             }
         };
@@ -2027,7 +2270,7 @@ async function selectScript(relPath) {
     }
 
     // Source code
-    const content = await fetchScriptContent(relPath, state.unlockedScripts[relPath] || '');
+    const content = await fetchScriptContent(relPath, getUnlockPassword(relPath));
     if (!content.locked && content !== undefined) {
         document.getElementById('detail-code').textContent = content;
     }
@@ -2106,7 +2349,7 @@ function openModal(mode = 'new') {
         const parts = state.activeScript.split('/');
         document.getElementById('modal-category').value = parts[0] || '';
         document.getElementById('modal-filename').value = parts[1] || '';
-        fetchScriptContent(state.activeScript, state.unlockedScripts[state.activeScript] || '').then(content => {
+        fetchScriptContent(state.activeScript, getUnlockPassword(state.activeScript)).then(content => {
             if (!content.locked) document.getElementById('modal-editor').value = content;
         });
     } else {
@@ -2521,10 +2764,10 @@ function bindEvents() {
                     'success'
                 );
                 if (!isLocked && newPass) {
-                    delete state.unlockedScripts[state.activeScript];
+                    clearScriptUnlock(state.activeScript);
                     selectScript(state.activeScript);
                 } else if (isLocked && !newPass) {
-                    delete state.unlockedScripts[state.activeScript];
+                    clearScriptUnlock(state.activeScript);
                     selectScript(state.activeScript);
                 }
                 closeLock();
