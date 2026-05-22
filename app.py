@@ -1200,8 +1200,7 @@ def run_script():
             t_metrics.start()
 
             _append_execution_line(execution, 'system', f'Starting script execution... (ID: {run_id})')
-            start_msg = f'Starting script execution... (ID: {run_id})\n'
-            yield f"data: {json.dumps({'type': 'started', 'run_id': run_id, 'content': start_msg})}\n\n"
+            yield "data: " + json.dumps({'type': 'started', 'run_id': run_id, 'content': f'Starting script execution... (ID: {run_id})\n'}) + "\n\n"
 
             for line in iter(proc.stdout.readline, ''):
                 if line:
@@ -1250,8 +1249,7 @@ def run_script():
                     duration_seconds=elapsed,
                     error_message='Script aborted by user',
                 )
-                aborted_payload = json.dumps({'type': 'aborted', 'run_id': run_id, 'content': 'Script aborted\n'})
-                yield f"data: {aborted_payload}\n\n"
+                yield "data: " + json.dumps({'type': 'aborted', 'run_id': run_id, 'content': 'Script aborted\n'}) + "\n\n"
             else:
                 system_mem = psutil.virtual_memory().total / (1024 * 1024)
                 mem_percent = (metrics['mem'] / system_mem * 100) if system_mem > 0 else 0
@@ -1294,8 +1292,7 @@ def run_script():
                     duration_seconds=time.time() - start_time,
                     error_message='Script aborted by user',
                 )
-                aborted_payload2 = json.dumps({'type': 'aborted', 'run_id': run_id, 'content': 'Script aborted\n'})
-                yield f"data: {aborted_payload2}\n\n"
+                yield "data: " + json.dumps({'type': 'aborted', 'run_id': run_id, 'content': 'Script aborted\n'}) + "\n\n"
             else:
                 _append_execution_line(execution, 'error', '❌ Execution timed out')
                 _finalize_execution(
@@ -1305,8 +1302,7 @@ def run_script():
                     duration_seconds=time.time() - start_time,
                     error_message='Process timed out',
                 )
-                timeout_payload = json.dumps({'type': 'error', 'content': '❌ Execution timed out\n'})
-                yield f"data: {timeout_payload}\n\n"
+                yield "data: " + json.dumps({'type': 'error', 'content': '❌ Execution timed out\n'}) + "\n\n"
         except Exception as e:
             _append_execution_line(execution, 'error', f'❌ Execution Error: {str(e)}')
             if proc is not None and getattr(proc, 'returncode', None) is not None:
