@@ -3337,7 +3337,6 @@ def save_script():
 
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
-    full_path = os.path.join(os.path.dirname(full_path), filename)
     with open(full_path, 'w', encoding='utf-8', newline='\n') as f:
         f.write(content)
 
@@ -3502,7 +3501,6 @@ def import_github():
         }), 401
 
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
-    full_path = os.path.join(os.path.dirname(full_path), filename)
 
     with open(
         full_path,
