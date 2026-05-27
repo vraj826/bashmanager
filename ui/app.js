@@ -2367,13 +2367,77 @@ function closeModal() {
 }
 
 // ─── Event Bindings ────────────────────────────────────────
-
 function bindEvents() {
     // Terminal Search
     const cliSearchInput = document.getElementById('cli-search-input');
     if (cliSearchInput) {
         cliSearchInput.addEventListener('input', () => highlightTerminalSearch());
     }
+    // Real-Time Sidebar Script Filter Logic (Fixed Variant)
+    const scriptSearchBar = document.getElementById('script-search-bar');
+    if (scriptSearchBar) {
+        scriptSearchBar.addEventListener('input', (e) => {
+            const filterText = e.target.value.toLowerCase().trim();
+            const scriptItems = document.querySelectorAll('#category-tree .script-item');
+            
+            scriptItems.forEach(item => {
+                const scriptNameEl = item.querySelector('.script-item-name');
+                if (!scriptNameEl) return;
+                
+                const scriptName = scriptNameEl.textContent.toLowerCase();
+                
+                if (scriptName.includes(filterText)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+
+            // Handle category auto-expansion smoothly without resetting terminal CSS
+            const categoryLists = document.querySelectorAll('#category-tree .script-list');
+            categoryLists.forEach(list => {
+                if (filterText !== '') {
+                    list.style.maxHeight = 'none';
+                    list.classList.remove('collapsed');
+                } else {
+                    list.style.maxHeight = '';
+                }
+            });
+        });
+    }
+
+    // ─── THEME TOGGLE ENGINE LAYER ───
+    const themeToggleBtn = document.getElementById('theme-toggle-btn');
+    const moonIcon = document.getElementById('theme-icon-moon');
+    const sunIcon = document.getElementById('theme-icon-sun');
+    
+    if (themeToggleBtn) {
+        // Read local cache profile preference on load
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        
+        if (savedTheme === 'light') {
+            document.body.classList.add('light-theme');
+            if (moonIcon) moonIcon.style.display = 'none';
+            if (sunIcon) sunIcon.style.display = 'block';
+        }
+
+        themeToggleBtn.addEventListener('click', () => {
+            const isCurrentlyLight = document.body.classList.contains('light-theme');
+            
+            if (isCurrentlyLight) {
+                document.body.classList.remove('light-theme');
+                localStorage.setItem('theme', 'dark');
+                if (moonIcon) moonIcon.style.display = 'block';
+                if (sunIcon) sunIcon.style.display = 'none';
+            } else {
+                document.body.classList.add('light-theme');
+                localStorage.setItem('theme', 'light');
+                if (moonIcon) moonIcon.style.display = 'none';
+                if (sunIcon) sunIcon.style.display = 'block';
+            }
+        });
+    }
+
     // Real-Time Sidebar Script Filter Logic (Fixed Variant)
     const scriptSearchBar = document.getElementById('script-search-bar');
     if (scriptSearchBar) {

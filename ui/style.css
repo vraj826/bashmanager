@@ -2341,3 +2341,65 @@ body.debugger-open #app-main {
     color: var(--text-secondary);
     opacity: 0.8;
 }
+/* ─── LIGHT THEME OVERRIDES ─── */
+body.light-theme {
+    background-color: #f8f9fa !important;
+    color: #212529 !important;
+    --border-color: #dee2e6;
+}
+
+body.light-theme #app-header {
+    background-color: #ffffff !important;
+    border-bottom: 1px solid #dee2e6 !important;
+}
+
+body.light-theme #app-header h1 {
+    color: #212529 !important;
+}
+
+body.light-theme #sidebar {
+    background-color: #e9ecef !important;
+    border-right: 1px solid #dee2e6 !important;
+}
+
+body.light-theme .sidebar-search-wrapper input {
+    background: #ffffff !important;
+    color: #212529 !important;
+    border: 1px solid #ced4da !important;
+}
+
+body.light-theme #cli-area {
+    background-color: #ffffff !important;
+}
+
+body.light-theme .cli-header {
+    background-color: #f1f3f5 !important;
+    border-bottom: 1px solid #dee2e6 !important;
+    color: #212529 !important;
+}
+
+body.light-theme .cli-body {
+    background-color: #ffffff !important;
+    color: #212529 !important;
+}
+
+body.light-theme .cli-welcome-text {
+    color: #495057 !important;
+}
+
+body.light-theme #cli-input {
+    background-color: #f1f3f5 !important;
+    color: #212529 !important;
+    border: 1px solid #ced4da !important;
+}
+
+body.light-theme #analysis-panel {
+    background-color: #e9ecef !important;
+    border-left: 1px solid #dee2e6 !important;
+    color: #212529 !important;
+}
+
+body.light-theme .analysis-empty h3 {
+    color: #212529 !important;
+}
+/* ───────────────────────────── */
