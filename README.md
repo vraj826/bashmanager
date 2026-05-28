@@ -135,4 +135,4 @@ Contributions from the open-source community are welcome. Please adhere to the f
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the [MIT License](LICENSE).
