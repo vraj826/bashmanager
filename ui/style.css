@@ -2247,3 +2247,24 @@ body.debugger-open #app-main {
     color: var(--text-secondary);
     opacity: 0.8;
 }
+/* ─── HISTORY MODAL LIVE SEARCH FILTER TREATMENT (#115) ─── */
+#history-modal-search {
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+#history-modal-search:focus {
+    outline: none;
+    border-color: var(--accent, #3b82f6) !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+/* Light theme overrides for history filter modules */
+body.light-theme #history-modal-search {
+    background: #ffffff !important;
+    border-color: #ced4da !important;
+    color: #212529 !important;
+}
+body.light-theme #history-modal-search:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}

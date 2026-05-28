@@ -197,7 +197,17 @@
                         <span class="cli-prompt">$</span> <span class="cli-welcome-text">Welcome to DevShell. Select a
                             script to run, or type a command below.</span>
                     </div>
+
+                    <div class="terminal-scroll-shortcuts" id="terminal-scroll-actions">
+                        <button class="scroll-action-btn" id="scroll-to-top-btn" title="Scroll to Top" aria-label="Scroll to top of terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                        </button>
+                        <button class="scroll-action-btn" id="scroll-to-bottom-btn" title="Scroll to Bottom" aria-label="Scroll to bottom of terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                    </div>
                 </div>
+
                 <div class="cli-input-bar">
                     <span class="cli-prompt-input">$</span>
                     <input type="text" id="cli-input" aria-label="Terminal command input" placeholder="Type a command and press Enter..." autocomplete="off" spellcheck="false">
@@ -619,6 +629,9 @@ echo 'Hello World'"></textarea>
                 <div>
                     <h2>Execution History</h2>
                     <p class="history-modal-subtitle">Search command and script runs, inspect failures, and export logs.</p>
+                </div>
+                <div class="history-search-filter-wrapper" style="flex: 1; max-width: 320px; margin: 0 24px;">
+                    <input type="text" id="history-modal-search" placeholder="Filter past execution commands live..." aria-label="Search past execution commands" autocomplete="off" spellcheck="false" style="width: 100%; padding: 8px 12px; border-radius: 6px; background: var(--bg-primary, #0d1117); border: 1px solid var(--border-color, #30363d); color: var(--text-primary, #c9d1d9); font-family: var(--font-mono, monospace); font-size: 12px;">
                 </div>
                 <div class="history-header-actions">
                     <button class="btn btn-action" id="history-export-txt">Export .txt</button>

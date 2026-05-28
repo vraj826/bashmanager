@@ -1779,6 +1779,49 @@ function bindEvents() {
     if (cliSearchInput) {
         cliSearchInput.addEventListener('input', () => highlightTerminalSearch());
     }
+    const historyModalSearch = document.getElementById('history-modal-search');
+    if (historyModalSearch) {
+        let historyFilterDebounceTimer;
+        historyModalSearch.addEventListener('input', (e) => {
+            clearTimeout(historyFilterDebounceTimer);
+            historyFilterDebounceTimer = setTimeout(() => {
+                const searchCriteriaText = e.target.value.toLowerCase().trim();
+                const historicalItemCards = document.querySelectorAll(
+                    '#history-modal-overlay .analytics-item, ' +
+                    '#history-modal-overlay .replay-line, ' +
+                    '#history-modal-overlay table tbody tr, ' +
+                    '#history-modal-overlay .history-item'
+                );
+                
+                historicalItemCards.forEach(cardRow => {
+                    const contentPayloadString = cardRow.textContent.toLowerCase();
+                    if (contentPayloadString.includes(searchCriteriaText)) {
+                        cardRow.style.display = ''; 
+                    } else {
+                        cardRow.style.display = 'none'; 
+                    }
+                });
+            }, 150);
+        });
+    }
+
+    // ─── TERMINAL FLOATING QUICK-SCROLL ACTIONS (#116) ───
+    const terminalBodyContainer = document.getElementById('terminal-body');
+    const scrollUpTriggerBtn = document.getElementById('scroll-to-top-btn');
+    const scrollDownTriggerBtn = document.getElementById('scroll-to-bottom-btn');
+
+    if (terminalBodyContainer) {
+        if (scrollUpTriggerBtn) {
+            scrollUpTriggerBtn.addEventListener('click', () => {
+                terminalBodyContainer.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        }
+        if (scrollDownTriggerBtn) {
+            scrollDownTriggerBtn.addEventListener('click', () => {
+                terminalBodyContainer.scrollTo({ top: terminalBodyContainer.scrollHeight, behavior: 'smooth' });
+            });
+        }
+    }
 
     // Terminal Tabs
     const btnAddTab = document.getElementById('btn-add-tab');
