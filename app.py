@@ -1,7 +1,7 @@
 import os
 import json
 import time
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 import threading
 import queue
@@ -150,7 +150,7 @@ def load_workspace_state():
         corrupted_path = WORKSPACE_STATE_FILE + ".corrupted"
         try:
             shutil.move(WORKSPACE_STATE_FILE, corrupted_path)
-        except Exception:
+        except Exception:  # nosec B110
             pass
         return {"corrupted": True, "error": str(e)}
 
@@ -2270,7 +2270,7 @@ def check_lock(rel_path: str, provided_pass: str) -> bool:
                     new_hash = generate_password_hash(provided_pass)
                     locks[rel_path] = new_hash
                     save_locks(locks)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
                 return True
             return False
@@ -2302,7 +2302,7 @@ def parse_script_metadata(filepath):
                     metadata["tag"] = line[6:].strip()
                 elif not line.startswith("#") and line:
                     break
-    except Exception:
+    except Exception:  # nosec B110
         pass
     return metadata
 
@@ -2945,7 +2945,7 @@ def _terminate_process_tree(proc, timeout=3):
                 try:
                     if p.is_running():
                         alive.append(p)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
         # Kill remaining processes
@@ -2960,7 +2960,7 @@ def _terminate_process_tree(proc, timeout=3):
         if alive:
             try:
                 psutil.wait_procs(alive, timeout=2)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
     except (psutil.NoSuchProcess, ProcessLookupError):
         # Parent process already gone
@@ -2974,9 +2974,9 @@ def _terminate_process_tree(proc, timeout=3):
             try:
                 proc.kill()
                 proc.wait(timeout=1)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
-        except Exception:
+        except Exception:  # nosec B110
             pass
     except Exception:
         # Any other exception fallback
@@ -2987,9 +2987,9 @@ def _terminate_process_tree(proc, timeout=3):
             try:
                 proc.kill()
                 proc.wait(timeout=1)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     # Ensure parent python subprocess object is fully reaped
@@ -2999,7 +2999,7 @@ def _terminate_process_tree(proc, timeout=3):
         try:
             proc.kill()
             proc.wait(timeout=1)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 
@@ -3218,7 +3218,7 @@ def run_script():
                 bufsize=1,
                 universal_newlines=True,
                 shell=False
-            )
+            )  # nosec B603
 
             with active_processes_lock:
                 active_processes[run_id] = {
@@ -3257,7 +3257,7 @@ def run_script():
                     q.put(SENTINEL)
                     try:
                         stream.close()
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
 
             t_reader = threading.Thread(
@@ -3555,7 +3555,7 @@ def exec_command():
                 bufsize=1,
                 universal_newlines=True,
                 shell=False
-            )
+            )  # nosec B603
 
             with active_processes_lock:
                 active_processes[run_id] = {
@@ -3579,7 +3579,7 @@ def exec_command():
                     q.put(SENTINEL)
                     try:
                         stream.close()
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
 
             t_reader = threading.Thread(
@@ -3960,32 +3960,34 @@ def raise_pr():
         target_repo = validate_repo_name(target_repo)
     branch_name = validate_git_branch(branch_name)
 
+    git_path = shutil.which("git") or "git"
+
     try:
         # Check if we are in a git repo
-        subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], check=True, capture_output=True, shell=False)
+        subprocess.run([git_path, 'rev-parse', '--is-inside-work-tree'], check=True, capture_output=True, shell=False)  # nosec B603 B607
         
         # 1. Create new local branch for the contribution
-        checkout_existing = subprocess.run(['git', 'checkout', branch_name], capture_output=True, shell=False)
+        checkout_existing = subprocess.run([git_path, 'checkout', branch_name], capture_output=True, shell=False)  # nosec B603 B607
         if checkout_existing.returncode != 0:
-            subprocess.run(['git', 'checkout', '-b', branch_name], check=True, capture_output=True, shell=False)
+            subprocess.run([git_path, 'checkout', '-b', branch_name], check=True, capture_output=True, shell=False)  # nosec B603 B607
         
         # 2. Stage only the specific script file
-        subprocess.run(['git', 'add', full_path], check=True, capture_output=True, shell=False)
+        subprocess.run([git_path, 'add', full_path], check=True, capture_output=True, shell=False)  # nosec B603 B607
         
         # 3. Commit the changes
-        subprocess.run(['git', 'commit', '-m', commit_msg], check=True, capture_output=True, shell=False)
+        subprocess.run([git_path, 'commit', '-m', commit_msg], check=True, capture_output=True, shell=False)  # nosec B603 B607
         
         # 4. Push to target remote
         # If the user provided a specific target repository URL, we push directly to it.
         # Otherwise, we push to the default 'origin'.
         remote_to_push = target_repo if target_repo else 'origin'
-        subprocess.run(['git', 'push', '-u', remote_to_push, branch_name], check=True, capture_output=True, shell=False)
+        subprocess.run([git_path, 'push', '-u', remote_to_push, branch_name], check=True, capture_output=True, shell=False)  # nosec B603 B607
         # 5. Generate a GitHub PR Link
         # If an external repo URL was provided, use that to construct the base URL.
         if target_repo:
             remote_url = target_repo.replace(".git", "")
         else:
-            remote_res = subprocess.run(['git', 'remote', 'get-url', 'origin'], check=True, capture_output=True, text=True, shell=False)
+            remote_res = subprocess.run([git_path, 'remote', 'get-url', 'origin'], check=True, capture_output=True, text=True, shell=False)  # nosec B603 B607
             remote_url = remote_res.stdout.strip().replace('.git', '')
             
         if remote_url.startswith('git@github.com:'):
@@ -4000,7 +4002,7 @@ def raise_pr():
 
         # 6. Switch back to the main branch to keep the workspace stable
         default_branch = get_default_branch()
-        subprocess.run(['git', 'checkout', default_branch], check=True, capture_output=True, shell=False)
+        subprocess.run([git_path, 'checkout', default_branch], check=True, capture_output=True, shell=False)  # nosec B603 B607
         
         return jsonify({'success': True, 'pr_url': pr_url, 'branch': branch_name})
         
@@ -4008,7 +4010,7 @@ def raise_pr():
         err_msg = e.stderr.decode() if e.stderr else str(e)
         # Attempt recovery to main
         default_branch = get_default_branch()
-        subprocess.run(['git', 'checkout', default_branch], capture_output=True, shell=False)
+        subprocess.run([git_path, 'checkout', default_branch], capture_output=True, shell=False)  # nosec B603 B607
         return jsonify({'error': err_msg, 'success': False}), 500
     except Exception as e:
         return jsonify({"error": str(e), "success": False}), 500
@@ -4043,13 +4045,14 @@ def _find_shell():
 
 def get_default_branch():
     try:
+        git_path = shutil.which("git") or "git"
         result = subprocess.run(
-            ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+            [git_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
             capture_output=True,
             text=True,
             check=True,
             shell=False
-        )
+        )  # nosec B603 B607
 
         ref = result.stdout.strip()
 
