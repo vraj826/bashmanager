@@ -1075,6 +1075,50 @@ async function abortScriptRun(termId = state.activeTerminalId) {
 }
 
 async function runScript(relPath) {
+    // Show arguments modal before running the script
+    showArgumentsModal(relPath);
+}
+
+function showArgumentsModal(relPath) {
+    const overlay = document.getElementById('arguments-modal-overlay');
+    const input = document.getElementById('arguments-input');
+    const preview = document.getElementById('arguments-preview');
+    const previewList = document.getElementById('arguments-preview-list');
+    
+    // Store script path in overlay for retrieval in run handler
+    overlay._scriptPath = relPath;
+    
+    input.value = '';
+    preview.style.display = 'none';
+    previewList.innerHTML = '';
+    
+    // Setup input change listener for preview
+    input.onchange = input.oninput = () => {
+        const text = input.value.trim();
+        if (!text) {
+            preview.style.display = 'none';
+            return;
+        }
+        
+        const args = text.split('\n').filter(line => line.trim()).map(line => line.trim());
+        previewList.innerHTML = args.map((arg, idx) => `<div style="margin: 4px 0;"><strong>[${idx}]:</strong> <code>${escapeHtml(arg)}</code></div>`).join('');
+        preview.style.display = '';
+    };
+    
+    overlay.classList.add('active');
+}
+
+function closeArgumentsModal() {
+    const overlay = document.getElementById('arguments-modal-overlay');
+    overlay.classList.remove('active');
+}
+
+async function executeScriptWithArguments(relPath, argumentsText) {
+    closeArgumentsModal();
+    
+    // Parse arguments from textarea
+    const arguments_list = argumentsText.trim().split('\n').filter(line => line.trim()).map(line => line.trim());
+    
     const termId = state.activeTerminalId;
     if (state.runningScripts[termId]) return;
     const runStatus = document.getElementById('run-status');
@@ -1086,6 +1130,7 @@ async function runScript(relPath) {
     state.runningScripts[termId] = {
         run_id: null,
         relPath,
+        arguments: arguments_list,
         abortRequested: false,
         aborting: false,
         killSent: false,
@@ -1103,7 +1148,7 @@ async function runScript(relPath) {
         resourcePanel.style.display = 'none';
     }
 
-    appendToCli(`$ Running script: ${relPath}`, 'system', termId);
+    appendToCli(`$ Running script: ${relPath}` + (arguments_list.length > 0 ? ` [with ${arguments_list.length} argument(s)]` : ''), 'system', termId);
     if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('info', `▶ Running script: ${relPath}`, 'script');
 
     if (termId === state.activeTerminalId) {
@@ -1115,7 +1160,7 @@ async function runScript(relPath) {
         const res = await fetch(API.run, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: relPath, password: getUnlockPassword(relPath) }),
+            body: JSON.stringify({ path: relPath, password: getUnlockPassword(relPath), arguments: arguments_list }),
             signal: controller.signal
         });
 
@@ -3464,6 +3509,30 @@ function bindEvents() {
     document.getElementById('modal-close').addEventListener('click', closeModal);
     document.getElementById('modal-cancel').addEventListener('click', closeModal);
     document.getElementById('modal-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-overlay') closeModal(); });
+
+    // Arguments Modal setup
+    const argumentsOverlay = document.getElementById('arguments-modal-overlay');
+    if (argumentsOverlay) {
+        const closeArguments = () => closeArgumentsModal();
+        const runArguments = () => {
+            const input = document.getElementById('arguments-input');
+            const relPath = argumentsOverlay._scriptPath; // Store script path in overlay element
+            executeScriptWithArguments(relPath, input.value);
+        };
+        
+        document.getElementById('arguments-modal-close').addEventListener('click', closeArguments);
+        document.getElementById('arguments-modal-cancel').addEventListener('click', closeArguments);
+        document.getElementById('arguments-modal-run').addEventListener('click', runArguments);
+        argumentsOverlay.addEventListener('click', (e) => { if (e.target.id === 'arguments-modal-overlay') closeArguments(); });
+        
+        // Allow Enter key to run in arguments textarea (Ctrl+Enter or similar)
+        document.getElementById('arguments-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                runArguments();
+            }
+        });
+    }
+
 
     document.getElementById('modal-save').addEventListener('click', () => {
         const category = document.getElementById('modal-category').value.trim();

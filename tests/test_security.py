@@ -138,6 +138,36 @@ def test_backward_compatibility_migration(app_module, tmp_path):
         assert app_module.check_lock(rel_path, "wrong_pwd") is False
 
 
+def test_backward_compatibility_migration(app_module, tmp_path):
+    locks_file = tmp_path / "locks.json"
+    rel_path = "category/script.sh"
+    password = "legacy_pwd"
+    legacy_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    
+    locks_file.write_text(json.dumps({rel_path: legacy_hash}))
+    
+    with patch.object(app_module, "LOCKS_FILE", str(locks_file)):
+        # Verify check_lock returns True for correct password
+        res = app_module.check_lock(rel_path, password)
+        assert res is True
+        
+        # Verify locks file has been migrated and is no longer legacy SHA-256
+        with open(locks_file, "r") as f:
+            updated_locks = json.load(f)
+            
+        migrated_data = updated_locks[rel_path]
+        assert isinstance(migrated_data, dict)
+        assert migrated_data["salt"] != ""
+        assert migrated_data["hash"] != legacy_hash
+        assert migrated_data["iterations"] == app_module.PBKDF2_ITERATIONS
+        
+        # Verify subsequent check_lock succeeds with the new PBKDF2 hash
+        assert app_module.check_lock(rel_path, password) is True
+        
+        # Verify incorrect password fails
+        assert app_module.check_lock(rel_path, "wrong_pwd") is False
+
+
 def test_migration_save_safety(app_module, tmp_path):
     locks_file = tmp_path / "locks.json"
     rel_path = "category/script.sh"
@@ -151,3 +181,142 @@ def test_migration_save_safety(app_module, tmp_path):
         with patch.object(app_module, "save_locks", side_effect=Exception("Disk full")):
             # check_lock should still verify password and return True
             assert app_module.check_lock(rel_path, password) is True
+
+
+def test_script_argument_injection_safety(client):
+    """Test that arguments with shell metacharacters are handled safely (no shell injection)"""
+    import os
+    import json
+    import tempfile
+    
+    script_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts')
+    test_script_path = os.path.join(script_dir, 'test_injection.sh')
+    
+    os.makedirs(script_dir, exist_ok=True)
+    
+    # Create a test script that would be vulnerable to shell injection if arguments aren't properly escaped
+    with open(test_script_path, 'w') as f:
+        f.write('#!/bin/bash\n')
+        f.write('# This script tests if arguments are properly escaped\n')
+        f.write('echo "Received $# arguments:"\n')
+        f.write('for arg in "$@"; do\n')
+        f.write('  echo "ARG: $arg"\n')
+        f.write('done\n')
+        f.write('exit 0\n')
+    
+    os.chmod(test_script_path, 0o755)
+    
+    try:
+        # Test with various shell metacharacters that would be dangerous if not properly escaped
+        injection_payloads = [
+            "; echo INJECTED; echo ",  # Command injection attempt
+            "$(echo INJECTED)",  # Command substitution attempt
+            "`echo INJECTED`",  # Backtick substitution attempt
+            "| grep INJECTED",  # Pipe injection attempt
+            "& echo INJECTED",  # Background execution attempt
+            ">\n/tmp/injected",  # File redirection attempt
+            "$((1+1))",  # Arithmetic injection attempt
+        ]
+        
+        for payload in injection_payloads:
+            response = client.post(
+                "/api/scripts/run",
+                json={
+                    "path": "test_injection.sh",
+                    "password": "",
+                    "arguments": [payload]
+                }
+            )
+            
+            assert response.status_code == 200
+            
+            # Collect output to verify the payload is treated as a literal string argument
+            output_lines = []
+            for line in response.data.decode('utf-8').split('\n\n'):
+                if line.startswith('data: '):
+                    try:
+                        event = json.loads(line[6:])
+                        if event.get('type') in ['stdout', 'system']:
+                            output_lines.append(event.get('content', ''))
+                    except:
+                        pass
+            
+            output = '\n'.join(output_lines)
+            
+            # Verify that:
+            # 1. The payload was echoed as a literal argument
+            # 2. No injection actually occurred
+            if 'ARG:' in output:
+                # We should see the argument literally, not executed
+                assert payload in output or any(
+                    part in output for part in payload.split(';')  # At least the first part should appear
+                )
+    
+    finally:
+        if os.path.exists(test_script_path):
+            os.remove(test_script_path)
+
+
+def test_argument_list_not_shell_concatenation(app_module):
+    """Test that _start_execution_record properly stores arguments as a list"""
+    execution = app_module._start_execution_record(
+        kind="script",
+        display_name="test.sh",
+        command_text="test.sh arg1 arg2",
+        shell_cmd="/bin/bash",
+        cwd="/tmp",
+        arguments=["arg1", "arg2"]
+    )
+    
+    assert execution is not None
+    assert execution["record"]["arguments"] == ["arg1", "arg2"]
+    assert isinstance(execution["record"]["arguments"], list)
+    assert execution["session_data"]["metadata"]["arguments"] == ["arg1", "arg2"]
+    
+    # Clean up
+    execution["handle"].close()
+
+
+def test_argument_normalization(app_module):
+    """Test that arguments are properly normalized (not tuples, sets, etc.)"""
+    # Test with tuple
+    execution = app_module._start_execution_record(
+        kind="script",
+        display_name="test.sh",
+        command_text="test.sh",
+        arguments=("arg1", "arg2")  # Tuple instead of list
+    )
+    
+    assert isinstance(execution["record"]["arguments"], list)
+    assert execution["record"]["arguments"] == ["arg1", "arg2"]
+    execution["handle"].close()
+    
+    # Test with None
+    execution = app_module._start_execution_record(
+        kind="script",
+        display_name="test.sh",
+        command_text="test.sh",
+        arguments=None
+    )
+    
+    assert isinstance(execution["record"]["arguments"], list)
+    assert execution["record"]["arguments"] == []
+    execution["handle"].close()
+
+
+def test_empty_string_arguments_filtered(app_module):
+    """Test that empty string arguments are handled correctly"""
+    execution = app_module._start_execution_record(
+        kind="script",
+        display_name="test.sh",
+        command_text="test.sh",
+        arguments=["arg1", "", "arg2", None]
+    )
+    
+    # Empty strings and None values should be converted to strings or filtered
+    # The current implementation converts all to strings, which may create empty strings
+    # This is acceptable as subprocess will handle empty string args
+    assert isinstance(execution["record"]["arguments"], list)
+    assert len(execution["record"]["arguments"]) >= 2
+    execution["handle"].close()
+

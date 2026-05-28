@@ -669,8 +669,49 @@ echo 'Hello World'"></textarea>
         </div>
     </div>
 
-    <!-- Execution History Modal -->
-    <div class="modal-overlay" id="history-modal-overlay">
+    <!-- Runtime Arguments Modal -->
+    <div class="modal-overlay" id="arguments-modal-overlay">
+        <div class="modal" id="arguments-modal" role="dialog" aria-modal="true" style="width: 500px; max-width: 90vw;">
+            <div class="modal-header">
+                <div>
+                    <h2>Script Arguments</h2>
+                    <p class="modal-subtitle" style="margin: 6px 0 0 0; color: var(--text-muted); font-size: 12px;">
+                        Provide optional arguments for script execution (one argument per line, or space-separated)
+                    </p>
+                </div>
+                <button class="btn-icon" id="arguments-modal-close" aria-label="Close arguments modal">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="arguments-input">Arguments</label>
+                    <textarea id="arguments-input" placeholder="--dry-run&#10;--verbose&#10;-f /path/to/file" 
+                        style="min-height: 120px; font-family: var(--font-mono); font-size: 12px;"></textarea>
+                    <p style="margin-top: 8px; color: var(--text-muted); font-size: 11px;">
+                        Each line becomes one argument. Leave empty to run without arguments.
+                    </p>
+                </div>
+                <div id="arguments-preview" style="display: none; margin-top: 12px; padding: 10px; background: var(--bg-tertiary); border-radius: 4px; border: 1px solid var(--border);">
+                    <p style="color: var(--text-muted); font-size: 11px; margin: 0 0 8px 0;">Preview:</p>
+                    <div id="arguments-preview-list" style="font-family: var(--font-mono); font-size: 11px; color: var(--text-primary);"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" id="arguments-modal-cancel">Cancel</button>
+                <button class="btn btn-save" id="arguments-modal-run" style="background: var(--accent); color: #fff; border-color: var(--accent);">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Run Script
+                </button>
+            </div>
+        </div>
+    </div>
+
+
         <div class="modal history-modal" id="history-modal" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <div>

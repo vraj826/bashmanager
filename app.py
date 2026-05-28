@@ -394,7 +394,7 @@ def _format_duration(seconds):
     return f"{minutes}m {remaining:.1f}s"
 
 
-def _start_execution_record(kind, display_name, command_text, shell_cmd="", cwd=""):
+def _start_execution_record(kind, display_name, command_text, shell_cmd="", cwd="", arguments=None):
     _ensure_log_dirs()
     started_at = _utc_now()
     monotonic_start = time.perf_counter()
@@ -404,6 +404,15 @@ def _start_execution_record(kind, display_name, command_text, shell_cmd="", cwd=
     log_path = os.path.join(EXECUTION_LOG_DIR, log_name)
     log_handle = open(log_path, "w", encoding="utf-8", newline="\n")
 
+    # Validate and normalize arguments
+    if arguments is None:
+        arguments = []
+    elif not isinstance(arguments, list):
+        arguments = []
+    else:
+        # Ensure all arguments are strings
+        arguments = [str(arg) for arg in arguments if arg is not None]
+
     record = {
         "id": execution_id,
         "kind": kind,
@@ -411,6 +420,7 @@ def _start_execution_record(kind, display_name, command_text, shell_cmd="", cwd=
         "command": command_text,
         "shell": shell_cmd,
         "cwd": cwd,
+        "arguments": arguments,
         "started_at": started_at.isoformat(),
         "status": "running",
         "exit_code": None,
@@ -431,6 +441,8 @@ def _start_execution_record(kind, display_name, command_text, shell_cmd="", cwd=
         log_handle.write(f"shell: {shell_cmd}\n")
     if cwd:
         log_handle.write(f"cwd: {cwd}\n")
+    if arguments:
+        log_handle.write(f"arguments: {json.dumps(arguments)}\n")
     log_handle.write("\n")
     log_handle.flush()
 
@@ -442,6 +454,7 @@ def _start_execution_record(kind, display_name, command_text, shell_cmd="", cwd=
             "command": command_text,
             "shell": shell_cmd,
             "cwd": cwd,
+            "arguments": arguments,
             "started_at": started_at.isoformat(),
         },
         "events": [],
@@ -545,6 +558,7 @@ def _finalize_execution(
         "command": record["command"],
         "shell": record["shell"],
         "cwd": record["cwd"],
+        "arguments": record.get("arguments", []),
         "started_at": record["started_at"],
         "finished_at": record["finished_at"],
         "status": record["status"],
@@ -3186,6 +3200,13 @@ def run_script():
     data = request.json
     rel_path = data.get("path", "")
     password = data.get("password", "")
+    # Accept arguments as a list (structured argv-style, not concatenated shell strings)
+    arguments = data.get("arguments", [])
+    if not isinstance(arguments, list):
+        arguments = []
+    else:
+        # Ensure all arguments are strings and safe
+        arguments = [str(arg) for arg in arguments if arg is not None]
 
     if not check_lock(rel_path, password):
         return jsonify({'error': 'Locked', 'success': False}), 401
@@ -3206,13 +3227,14 @@ def run_script():
         stop_event = threading.Event()
         t_reader = None
         try:
-            # 1. Initialize execution record inside generator to prevent leaks if not iterated
+            # 1. Initialize execution record with arguments
             execution = _start_execution_record(
                 kind="script",
                 display_name=rel_path,
-                command_text=f"{shell_cmd} {full_path}",
+                command_text=f"{shell_cmd} {full_path}" + (f" {' '.join(arguments)}" if arguments else ""),
                 shell_cmd=shell_cmd,
                 cwd=SCRIPTS_DIR,
+                arguments=arguments,
             )
 
             # Instrument script content for progress tracking
@@ -3241,10 +3263,12 @@ def run_script():
                 run_path = full_path
 
             # Use main's Windows support with your run_path
+            # CRITICAL: Append arguments to the args list (argv-style), NOT shell concatenation
+            # This prevents shell injection attacks
             args = (
-                [shell_cmd, run_path]
+                [shell_cmd, run_path] + arguments
                 if shell_cmd != "cmd.exe"
-                else ["cmd.exe", "/c", run_path]
+                else ["cmd.exe", "/c", run_path] + arguments
             )
 
             proc = subprocess.Popen(
