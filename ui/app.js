@@ -2799,8 +2799,8 @@ function renderSidebar() {
         const isExpanded = state.expandedCategories.has(cat) || !!query;
 
         html += `
-            <div class="category-header" role="button" tabindex="0" aria-expanded="${isExpanded}" onclick="toggleCategory('${cat}')" onkeydown="handleKeyboardAction(event, () => toggleCategory('${cat}'))">
-                <div class="category-header" onclick="toggleCategory('${cat}')">
+            <div class="category-section" data-category="${cat}">
+                <div class="category-header" role="button" tabindex="0" aria-expanded="${isExpanded}" onclick="toggleCategory('${cat}')" onkeydown="handleKeyboardAction(event, () => toggleCategory('${cat}'))">
                     <span class="category-arrow ${isExpanded ? 'expanded' : ''}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                     </span>
@@ -2816,7 +2816,11 @@ function renderSidebar() {
                         <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}" role="button" tabindex="0"
                             onclick="selectScript('${s.relative_path}')"
                             onkeydown="handleKeyboardAction(event, () => selectScript('${s.relative_path}'))"
-                            title="${escapeAttr(s.desc)}">
+                            title="${escapeAttr(s.desc)}"
+                            data-file="${escapeAttr(s.file)}"
+                            data-path="${escapeAttr(s.relative_path)}"
+                            data-tag="${escapeAttr(s.tag || '')}"
+                            data-desc="${escapeAttr(s.desc || '')}">
                             ${lockIcon}
                             <span class="script-item-icon" style="${s.locked ? 'display:none;' : ''}">${ICONS.script}</span>
                             <span class="script-item-name">${escapeHtml(s.name)}</span>
@@ -3097,89 +3101,63 @@ function bindEvents() {
         return queryIndex === normalizedQuery.length;
     }
 
-    // Real-Time Sidebar Script Filter Logic (Fixed Variant)
+    // Real-Time Sidebar Script Filter Logic
     const scriptSearchBar = document.getElementById('script-search-bar');
     if (scriptSearchBar) {
         scriptSearchBar.addEventListener('input', (e) => {
             const filterText = e.target.value.toLowerCase().trim();
-            const categoryLists = document.querySelectorAll('#category-tree .script-list');
-            const categoryContainers = Array.from(document.querySelectorAll('#category-tree > .category-header'));
+            const scriptItems = document.querySelectorAll('#category-tree .script-item');
 
-            if (filterText === '') {
-                const scriptItems = document.querySelectorAll('#category-tree .script-item');
-                scriptItems.forEach(item => {
-                    item.style.display = 'flex';
-                    item.removeAttribute('data-score');
-                });
-
-                categoryLists.forEach(list => {
-                    list.style.maxHeight = '';
-                });
-
-                categoryContainers.forEach(container => {
-                    container.style.display = '';
-                });
-
-                return;
-            }
-
-            const scriptItems = Array.from(document.querySelectorAll('#category-tree .script-item'));
-            const visibleByParent = new Map();
-            const bestScoreByParent = new Map();
-
+            // 1. Match item against five fields
             scriptItems.forEach(item => {
                 const scriptNameEl = item.querySelector('.script-item-name');
                 if (!scriptNameEl) return;
 
-                const scriptName = scriptNameEl.textContent.toLowerCase();
+                const name = scriptNameEl.textContent.toLowerCase();
+                const filename = (item.getAttribute('data-file') || '').toLowerCase();
+                const path = (item.getAttribute('data-path') || '').toLowerCase();
+                const tag = (item.getAttribute('data-tag') || '').toLowerCase();
+                const desc = (item.getAttribute('data-desc') || '').toLowerCase();
 
-                if (!fuzzyMatch(filterText, scriptName)) {
+                if (
+                    name.includes(filterText) ||
+                    filename.includes(filterText) ||
+                    path.includes(filterText) ||
+                    tag.includes(filterText) ||
+                    desc.includes(filterText)
+                ) {
+                    item.style.display = 'flex';
+                } else {
                     item.style.display = 'none';
-                    item.removeAttribute('data-score');
-                    return;
                 }
+            });
 
-                const score = scoreMatch(filterText, scriptName);
-                item.dataset.score = String(score);
-                item.style.display = 'flex';
-
-                const parent = item.parentElement;
-                if (!visibleByParent.has(parent)) {
-                    visibleByParent.set(parent, []);
+            // 2. Hide/show category wrappers (.category-section) based on visibility of their script items
+            const categorySections = document.querySelectorAll('#category-tree .category-section');
+            categorySections.forEach(section => {
+                const items = section.querySelectorAll('.script-item');
+                let hasVisible = false;
+                items.forEach(item => {
+                    if (item.style.display !== 'none') {
+                        hasVisible = true;
+                    }
+                });
+                if (hasVisible || filterText === '') {
+                    section.style.display = '';
+                } else {
+                    section.style.display = 'none';
                 }
-                visibleByParent.get(parent).push(item);
-                bestScoreByParent.set(parent, Math.max(bestScoreByParent.get(parent) ?? -1, score));
             });
-
-            visibleByParent.forEach((items, parent) => {
-                items.sort((a, b) => Number(b.dataset.score || 0) - Number(a.dataset.score || 0));
-                items.forEach(item => parent.appendChild(item));
-            });
-
-            categoryContainers.forEach(container => {
-                const list = container.querySelector('.script-list');
-                const hasVisibleItems = list && visibleByParent.has(list);
-                container.style.display = hasVisibleItems ? '' : 'none';
-            });
-
-            const rankedCategories = categoryContainers
-                .map(container => {
-                    const list = container.querySelector('.script-list');
-                    return {
-                        container,
-                        score: list ? (bestScoreByParent.get(list) ?? -1) : -1
-                    };
-                })
-                .filter(entry => entry.score >= 0)
-                .sort((a, b) => b.score - a.score);
-
-            const tree = document.getElementById('category-tree');
-            rankedCategories.forEach(({ container }) => tree.appendChild(container));
 
             // Handle category auto-expansion smoothly without resetting terminal CSS
+            const categoryLists = document.querySelectorAll('#category-tree .script-list');
             categoryLists.forEach(list => {
-                list.style.maxHeight = 'none';
-                list.classList.remove('collapsed');
+                if (filterText !== '') {
+                    list.style.maxHeight = 'none';
+                    list.classList.remove('collapsed');
+                } else {
+                    list.style.maxHeight = '';
+                }
             });
         });
     }
@@ -3216,38 +3194,7 @@ function bindEvents() {
         });
     }
 
-    // Real-Time Sidebar Script Filter Logic (Fixed Variant)
-    const scriptSearchBar = document.getElementById('script-search-bar');
-    if (scriptSearchBar) {
-        scriptSearchBar.addEventListener('input', (e) => {
-            const filterText = e.target.value.toLowerCase().trim();
-            const scriptItems = document.querySelectorAll('#category-tree .script-item');
-            
-            scriptItems.forEach(item => {
-                const scriptNameEl = item.querySelector('.script-item-name');
-                if (!scriptNameEl) return;
-                
-                const scriptName = scriptNameEl.textContent.toLowerCase();
-                
-                if (scriptName.includes(filterText)) {
-                    item.style.display = 'flex';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
 
-            // Handle category auto-expansion smoothly without resetting terminal CSS
-            const categoryLists = document.querySelectorAll('#category-tree .script-list');
-            categoryLists.forEach(list => {
-                if (filterText !== '') {
-                    list.style.maxHeight = 'none';
-                    list.classList.remove('collapsed');
-                } else {
-                    list.style.maxHeight = '';
-                }
-            });
-        });
-    }
 
     // Terminal Tabs
     const btnAddTab = document.getElementById('btn-add-tab');
