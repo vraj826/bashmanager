@@ -1129,7 +1129,7 @@ async function runScript(relPath) {
             cleanupRunningScript(termId);
             return;
         }
-         if (res.status === 404) {
+        if (res.status === 404) {
             appendToCli('Error: Script file not found. It may have been deleted or moved.', 'error', termId);
             if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', 'Script file not found — it may have been deleted or moved', 'script');
             if (termId === state.activeTerminalId) {
