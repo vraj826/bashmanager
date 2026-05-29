@@ -2288,6 +2288,7 @@ def parse_script_metadata(filepath):
         "name": os.path.basename(filepath).replace(".sh", "").replace("_", " ").title(),
         "desc": "",
         "tag": "",
+        "url": "",
         "path": filepath,
     }
     try:
@@ -2300,6 +2301,8 @@ def parse_script_metadata(filepath):
                     metadata["desc"] = line[7:].strip()
                 elif line.startswith("# tag:"):
                     metadata["tag"] = line[6:].strip()
+                elif line.startswith("# url:"):
+                    metadata["url"] = line[6:].strip()
                 elif not line.startswith("#") and line:
                     break
     except Exception:  # nosec B110
