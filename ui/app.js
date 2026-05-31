@@ -398,7 +398,7 @@ function renderReliabilityEmpty(message = 'No data available.', variant = 'empty
 function setReliabilityPanelContent(element, html, emptyMessage, variant = 'empty') {
     if (!element) return;
     element.innerHTML = (html && html.trim())
-        ? html
+        ? safeHTML(html)
         : renderReliabilityEmpty(emptyMessage, variant);
 }
 
@@ -1488,7 +1488,7 @@ function renderHistoryPage() {
     const visibleEntries = entries.slice(0, visibleCount);
     const hasMore = visibleCount < entries.length;
 
-    list.innerHTML = visibleEntries.map(entry => {
+    list.innerHTML = safeHTML(visibleEntries.map(entry => {
         const statusClass = entry.status === 'failed' ? 'failed' : 'success';
         const kindLabel = entry.kind === 'script' ? 'Script' : 'Command';
         const duration = formatHistoryDuration(entry);
@@ -1524,7 +1524,7 @@ function renderHistoryPage() {
                 <div class="history-entry-excerpt">${excerpt}</div>
             </article>
         `;
-    }).join('');
+    }).join(''));
 
     if (hasMore) {
         const loadMore = document.createElement('button');
@@ -2935,7 +2935,7 @@ function renderSidebar() {
     const rootArrowClass = rootExpanded ? 'expanded' : '';
     const rootChildrenHtml = html || '<div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">No scripts found. Create one to get started.</div>';
 
-    tree.innerHTML = `
+    tree.innerHTML = safeHTML(`
         <div class="root-folder">
             <div class="category-header root-header" role="button" tabindex="0" aria-expanded="${rootExpanded}" onclick="toggleRoot()" onkeydown="handleKeyboardAction(event, () => toggleRoot())">
                 <span class="category-arrow ${rootArrowClass}">
@@ -2949,12 +2949,12 @@ function renderSidebar() {
                 ${rootChildrenHtml}
             </div>
         </div>
-    `;
+    `);
     countEl.textContent = totalScripts;
 
     if (favScripts.length > 0) {
         favsSection.style.display = '';
-        favsList.innerHTML = favScripts.map(s => {
+        favsList.innerHTML = safeHTML(favScripts.map(s => {
             const displayName = ((s.name || '') + '').trim() || s.file || (s.relative_path || '').split('/').pop() || '';
             return `
             <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}" role="button" tabindex="0"
@@ -2963,7 +2963,7 @@ function renderSidebar() {
                 <span class="script-item-icon" style="color: var(--accent-yellow); stroke: var(--accent-yellow);">${ICONS.favorite}</span>
                 <span class="script-item-name">${escapeHtml(displayName)}</span>
             </li>
-        `}).join('');
+        `}).join(''));
     } else {
         favsSection.style.display = 'none';
     }
@@ -3817,6 +3817,42 @@ function escapeAttr(text) {
     return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/**
+ * Sanitize HTML string to prevent XSS attacks.
+ * Uses DOMPurify when available, falls back to aggressive tag stripping.
+ */
+function safeHTML(html) {
+    if (typeof html !== 'string') return '';
+    if (typeof DOMPurify !== 'undefined') {
+        return DOMPurify.sanitize(html, {
+            ALLOWED_TAGS: [
+                'div', 'span', 'p', 'br', 'strong', 'em', 'b', 'i', 'u',
+                'ul', 'ol', 'li', 'pre', 'code', 'article', 'section',
+                'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'button', 'label',
+                'input', 'svg', 'path', 'circle', 'ellipse', 'line',
+                'polyline', 'polygon', 'rect', 'g', 'text', 'use', 'defs',
+                'kbd', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
+            ],
+            ALLOWED_ATTR: [
+                'class', 'id', 'style', 'role', 'tabindex', 'title',
+                'aria-label', 'aria-live', 'aria-expanded', 'aria-hidden',
+                'data-id', 'data-log-file', 'data-index', 'data-cmd',
+                'data-type', 'data-session-id',
+                'xmlns', 'viewBox', 'width', 'height', 'fill', 'stroke',
+                'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+                'd', 'cx', 'cy', 'r', 'rx', 'ry', 'x', 'y',
+                'x1', 'y1', 'x2', 'y2', 'points',
+                'type', 'placeholder', 'value', 'hidden',
+                'onclick', 'onkeydown',
+            ],
+        });
+    }
+    // Fallback: strip all tags except safe ones
+    return html.replace(/<script[\s>][\s\S]*?<\/script>/gi, '')
+               .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+               .replace(/javascript\s*:/gi, '');
+}
+
 function removeNotification(notification) {
     if (!notification || notification.classList.contains('removing')) {
         return;
@@ -4077,11 +4113,11 @@ function rebuildTerminalWorkspace(terminals, activeTerminalId, dataSnapshots = [
         bodyContainer.setAttribute('role', 'log');
         bodyContainer.setAttribute('aria-live', 'polite');
         const snapshot = dataSnapshots?.find(snap => snap.id === id);
-        bodyContainer.innerHTML = snapshot?.content ||
+        bodyContainer.innerHTML = safeHTML(snapshot?.content ||
             `<div class="cli-welcome">
                 <span class="cli-prompt">$</span>
                 <span class="cli-welcome-text">Restored terminal session.</span>
-            </div>`;
+            </div>`);
         cliArea.insertBefore(bodyContainer, document.querySelector('.cli-input-bar'));
 
         state.terminals.push(id);
@@ -4161,7 +4197,7 @@ async function openWorkspaceManager() {
         if (!data.profiles.length) {
             container.innerHTML = '<p style="color:var(--text-secondary);margin:0;">No saved profiles yet.</p>';
         } else {
-            container.innerHTML = data.profiles.map(profile => `
+            container.innerHTML = safeHTML(data.profiles.map(profile => `
                 <div class="workspace-profile-item">
                     <span>${escapeHtml(profile)}</span>
                     <div class="workspace-profile-actions">
@@ -4169,7 +4205,7 @@ async function openWorkspaceManager() {
                         <button class="btn" onclick="deleteWorkspaceProfile('${escapeHtml(profile)}')">Delete</button>
                     </div>
                 </div>
-            `).join('');
+            `).join(''));
         }
 
         document
