@@ -3247,7 +3247,7 @@ def run_script():
                 else ["cmd.exe", "/c", run_path]
             )
 
-            proc = subprocess.Popen(
+            proc = subprocess.Popen(  # nosec B603 - intentional local script execution
                 args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
