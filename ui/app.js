@@ -4794,6 +4794,27 @@ document.addEventListener('keydown', (e) => {
 // Initialize debugger when DOM is ready
 document.addEventListener('DOMContentLoaded', () => { DebuggerConsole.init(); });
 
+// ─── REAL-TIME DIGITAL SYSTEM CLOCK ENGINE (#114) ───
+function startHeaderClock() {
+    const clockElement = document.getElementById('header-clock');
+    if (!clockElement) return;
+
+    const updateClock = () => {
+        const now = new Date();
+        
+        // Pad single digits with leading zeros for consistent HH:MM:SS layouts
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+
+        clockElement.textContent = `${hours}:${minutes}:${seconds}`;
+    };
+
+    // Fire immediately on execution to prevent a 1000ms layout text jump
+    updateClock();
+
+    // Hook up the optimized 1000ms execution loop lifecycle track
+    setInterval(updateClock, 1000);
 // Global page lifecycle listeners for SSE resource cleanup
 if (!window.hasRegisteredLifecycleCleanup) {
     window.hasRegisteredLifecycleCleanup = true;
