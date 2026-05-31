@@ -125,6 +125,9 @@ Contributions from the open-source community are welcome. Please adhere to the f
 3. **Cross-Platform Compatibility:** Ensure OS subprocess invocations account for both Windows architectures (via Git Bash/WSL/cmd) and native POSIX Linux systems. Avoid hardcoding OS-specific file paths.
 4. **Code Formatting:** Adhere strictly to PEP-8 for Python components and standard modern JS styling.
 
+> GitHub Actions automatically runs ShellCheck on all `.sh` files to ensure shell script quality and consistency.
+
+
 ### Submission Process
 
 1. Fork the project.
