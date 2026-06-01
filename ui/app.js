@@ -25,6 +25,8 @@ const API = {
     reliability_trends: '/api/reliability/trends',
     reliability_recommendations: '/api/reliability/recommendations',
     reliability_diagnostics: '/api/reliability/diagnostics',
+    workspace_export: '/api/workspace/export',
+    workspace_import: '/api/workspace/import',
 };
 
 // ─── State ────────────────────────────────────────────────
@@ -3629,6 +3631,22 @@ function bindEvents() {
     on('workspace-restore-btn', 'click', () => restorePendingWorkspace('full'));
     on('workspace-safe-btn', 'click', () => restorePendingWorkspace('safe'));
     on('workspace-clean-btn', 'click', closeWorkspaceRestore);
+    document
+        .getElementById('workspace-export-btn')
+        ?.addEventListener('click', exportWorkspaceSnapshot);
+
+    document
+        .getElementById('workspace-import-btn')
+        ?.addEventListener('click', () => {
+            document.getElementById('workspace-import-file')?.click();
+        });
+
+    document
+        .getElementById('workspace-import-file')
+        ?.addEventListener('change', (event) => {
+            importWorkspaceSnapshot(event.target.files?.[0]);
+            event.target.value = '';
+        });
 }
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -3823,25 +3841,65 @@ async function checkWorkspaceRecovery() {
         }
 
         const snapshot = data.workspace.workspace;
-
-        const savedAt = data.workspace.saved_at;
-        const modalBody = document.querySelector('#workspace-restore-overlay .modal-body');
-        if (modalBody && savedAt) {
-            const existing = modalBody.querySelector('.workspace-snapshot-meta');
-            if (!existing) {
-                const meta = document.createElement('div');
-                meta.className = 'workspace-snapshot-meta';
-                meta.textContent = `Snapshot saved at: ${savedAt}`;
-                modalBody.appendChild(meta);
-            }
-        }
+        renderWorkspaceRestorePreview(data.workspace, workspaceDiag);
 
         state.pendingWorkspaceSnapshot = snapshot;
         openOverlay('workspace-restore-overlay');
+        document
+            .getElementById('workspace-restore-overlay')
+            ?.classList.add('active');
+
+        document
+            .getElementById('workspace-restore-btn')
+            ?.addEventListener('click', () => {
+                restoreWorkspace(snapshot, 'full');
+            }, { once: true });
+
+        document
+            .getElementById('workspace-safe-btn')
+            ?.addEventListener('click', () => {
+                restoreWorkspace(snapshot, 'safe');
+            }, { once: true });
+
+        document
+            .getElementById('workspace-clean-btn')
+            ?.addEventListener('click', closeWorkspaceRestore, { once: true });
 
     } catch (err) {
         console.error(err);
     }
+}
+
+function renderWorkspaceRestorePreview(workspacePayload, diagnostics = {}) {
+    const panel = document.getElementById('workspace-restore-preview');
+    if (!panel) return;
+
+    const snapshot = workspacePayload?.workspace || {};
+    const preview = diagnostics.preview || {};
+    const warnings = diagnostics.warnings || [];
+    const terminalCount = preview.terminal_count ?? (Array.isArray(snapshot.terminals) ? snapshot.terminals.length : 0);
+    const rows = [
+        ['Workspace', preview.workspace_name || 'Recovered workspace'],
+        ['Terminals', terminalCount],
+        ['Snapshot', preview.snapshot_timestamp || workspacePayload?.saved_at || 'Unknown'],
+        ['Replay', preview.has_replay ? 'Present' : 'None'],
+        ['Debugger', preview.has_debug ? 'Present' : 'None'],
+    ];
+
+    panel.hidden = false;
+    panel.innerHTML = safeHTML(`
+        <div class="workspace-integrity-grid">
+            ${rows.map(([label, value]) => `
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(String(value))}</strong>
+            `).join('')}
+        </div>
+        ${warnings.length ? `
+            <div class="workspace-integrity-warnings">
+                ${warnings.map(warning => `<div>${escapeHtml(warning)}</div>`).join('')}
+            </div>
+        ` : '<div class="workspace-integrity-ok">No integrity warnings.</div>'}
+    `);
 }
 
 function closeWorkspaceRestore() {
@@ -4007,6 +4065,56 @@ async function saveWorkspaceProfile() {
     } catch (err) {
         console.error(err);
         notify('Failed to save workspace profile.', 'error');
+    }
+}
+
+async function exportWorkspaceSnapshot() {
+    try {
+        const res = await fetch(API.workspace_export);
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            notify(data.error || 'No workspace snapshot available to export.', 'warning');
+            return;
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'devshell-workspace.json';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    } catch (err) {
+        console.error(err);
+        notify('Failed to export workspace snapshot.', 'error');
+    }
+}
+
+async function importWorkspaceSnapshot(file) {
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        const res = await fetch(API.workspace_import, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (!data.success) {
+            notify(data.error || 'Invalid workspace snapshot.', 'error');
+            return;
+        }
+
+        const warning = data.diagnostics?.warnings?.[0];
+        notify(warning || 'Workspace snapshot imported.', warning ? 'warning' : 'success');
+    } catch (err) {
+        console.error(err);
+        notify('Import must be a valid workspace JSON file.', 'error');
     }
 }
 
@@ -4503,3 +4611,425 @@ document.addEventListener('keydown', (e) => {
 // Initialize debugger when DOM is ready
 document.addEventListener('DOMContentLoaded', () => { DebuggerConsole.init(); });
 
+// ─── REAL-TIME DIGITAL SYSTEM CLOCK ENGINE (#114) ───
+function startHeaderClock() {
+    const clockElement = document.getElementById('header-clock');
+    if (!clockElement) return;
+
+    const updateClock = () => {
+        const now = new Date();
+        
+        // Pad single digits with leading zeros for consistent HH:MM:SS layouts
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+
+        clockElement.textContent = `${hours}:${minutes}:${seconds}`;
+    };
+
+    // Fire immediately on execution to prevent a 1000ms layout text jump
+    updateClock();
+
+    // Hook up the optimized 1000ms execution loop lifecycle track
+    setInterval(updateClock, 1000);
+// Global page lifecycle listeners for SSE resource cleanup
+if (!window.hasRegisteredLifecycleCleanup) {
+    window.hasRegisteredLifecycleCleanup = true;
+
+    const handleLifecycleCleanup = () => {
+        if (state.runningScripts) {
+            Object.keys(state.runningScripts).forEach(termId => {
+                const running = state.runningScripts[termId];
+                if (running) {
+                    if (running.controller) {
+                        if (!running.controller.signal.aborted) {
+                            try {
+                                running.controller.abort();
+                            } catch (_) {}
+                        }
+                    }
+                    if (running.run_id && !running.killSent) {
+                        running.killSent = true;
+                        fetch(API.kill, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ run_id: running.run_id }),
+                            keepalive: true
+                        }).catch(() => {});
+                    }
+                }
+            });
+            state.runningScripts = {};
+        }
+    };
+
+    window.addEventListener('beforeunload', handleLifecycleCleanup);
+    window.addEventListener('pagehide', handleLifecycleCleanup);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            handleLifecycleCleanup();
+        }
+    });
+}
+
+// ─── Predefined Dev & DevOps Tools Templates ────────────────
+const PREDEFINED_TOOLS = {
+    sys_info: {
+        name: "System Info Dashboard",
+        category: "dev-tools",
+        filename: "system_info.sh",
+        url: "https://explainshell.com",
+        content: `#!/bin/bash
+# name: System Info Dashboard
+# desc: Detailed system diagnostic displaying CPU load, Memory stats, Disk status, and network details.
+# tag: dev-tools, system
+# url: https://explainshell.com
+
+echo "=== System Info Dashboard ==="
+echo "Date: $(date)"
+echo "OS: $(uname -a)"
+echo ""
+echo "--- CPU LOAD ---"
+uptime
+echo ""
+echo "--- MEMORY USAGE ---"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    vm_stat | perl -ne '/page size of (\\d+) bytes/ && ($s=$1); /Pages free:\\s+(\\d+)/ && ($f=$1); /Pages active:\\s+(\\d+)/ && ($a=$1); /Pages inactive:\\s+(\\d+)/ && ($i=$1); /Pages speculative:\\s+(\\d+)/ && ($sp=$1); /Pages wired down:\\s+(\\d+)/ && ($w=$1); END { printf "Active: %.2fMB\\nInactive: %.2fMB\\nSpeculative: %.2fMB\\nWired: %.2fMB\\nFree: %.2fMB\\n", ($a*$s)/1048576, ($i*$s)/1048576, ($sp*$s)/1048576, ($w*$s)/1048576, ($f*$s)/1048576 }'
+else
+    free -m
+fi
+echo ""
+echo "--- DISK SPACE ---"
+df -h | grep -E '^/dev/' || df -h
+echo ""
+echo "--- NETWORK DEVICES ---"
+ifconfig -a || ip a
+`
+    },
+    port_scanner: {
+        name: "Process Port Lister",
+        category: "dev-tools",
+        filename: "process_port_lister.sh",
+        url: "https://portchecktool.com",
+        content: `#!/bin/bash
+# name: Process Port Lister
+# desc: Scan and list all active listening ports and the respective processes bound to them.
+# tag: dev-tools, network
+# url: https://portchecktool.com
+
+echo "=== Process Port Lister ==="
+echo "Scanning for active listening sockets..."
+echo ""
+if command -v lsof >/dev/null 2>&1; then
+    lsof -i -P -n | grep LISTEN || echo "No listening ports found via lsof."
+elif command -v netstat >/dev/null 2>&1; then
+    netstat -antp | grep LISTEN || netstat -an | grep LISTEN || echo "No listening ports found via netstat."
+elif command -v ss >/dev/null 2>&1; then
+    ss -lntp || ss -ln || echo "No listening ports found via ss."
+else
+    echo "Error: Neither lsof, netstat, nor ss found on this system."
+fi
+`
+    },
+    find_large_files: {
+        name: "Find Large Files (>100MB)",
+        category: "dev-tools",
+        filename: "find_large_files.sh",
+        url: "https://tldr.sh",
+        content: `#!/bin/bash
+# name: Find Large Files (>100MB)
+# desc: Search the current directory recursively and list all files larger than 100MB.
+# tag: dev-tools, search
+# url: https://tldr.sh
+
+TARGET_DIR="."
+echo "=== Find Large Files (>100MB) ==="
+echo "Searching in: $TARGET_DIR"
+echo "This might take a moment..."
+echo ""
+find "$TARGET_DIR" -type f -size +100M -exec du -h {} + 2>/dev/null | sort -rh || find "$TARGET_DIR" -type f -size +100000k -exec du -h {} + 2>/dev/null | sort -rh
+echo ""
+echo "Search complete."
+`
+    },
+    json_formatter: {
+        name: "JSON Formatter/Validator",
+        category: "dev-tools",
+        filename: "json_formatter.sh",
+        url: "https://jsonformatter.org",
+        content: `#!/bin/bash
+# name: JSON Formatter/Validator
+# desc: Pipe JSON input directly into Python's json.tool for format-indenting and validity checking.
+# tag: dev-tools, json
+# url: https://jsonformatter.org
+
+echo "=== JSON Formatter/Validator ==="
+echo "Enter/Paste your raw JSON content below, then press Ctrl+D to format:"
+echo ""
+TMP_FILE=$(mktemp)
+cat > "$TMP_FILE"
+echo ""
+echo "--- Formatted Output ---"
+if command -v python3 >/dev/null 2>&1; then
+    python3 -m json.tool "$TMP_FILE"
+elif command -v python >/dev/null 2>&1; then
+    python -m json.tool "$TMP_FILE"
+elif command -v jq >/dev/null 2>&1; then
+    jq . "$TMP_FILE"
+else
+    echo "Error: Neither python3, python, nor jq found to parse JSON."
+    cat "$TMP_FILE"
+fi
+rm -f "$TMP_FILE"
+`
+    },
+    base64_util: {
+        name: "Base64 Encode/Decode",
+        category: "dev-tools",
+        filename: "base64_util.sh",
+        url: "https://www.base64decode.org",
+        content: `#!/bin/bash
+# name: Base64 Encode/Decode
+# desc: Easily encode regular text or decode encoded Base64 strings.
+# tag: dev-tools, utility
+# url: https://www.base64decode.org
+
+echo "=== Base64 Utility ==="
+echo "1) Encode Text to Base64"
+echo "2) Decode Base64 to Text"
+read -p "Select option (1 or 2): " choice
+echo ""
+if [ "$choice" = "1" ]; then
+    read -p "Enter text to encode: " txt
+    echo -n "$txt" | base64
+elif [ "$choice" = "2" ]; then
+    read -p "Enter Base64 string to decode: " b64
+    echo -n "$b64" | base64 --decode || echo -n "$b64" | base64 -d
+else
+    echo "Invalid choice."
+fi
+echo ""
+`
+    },
+    docker_status: {
+        name: "Docker Container Status",
+        category: "devops-tools",
+        filename: "docker_status.sh",
+        url: "https://hub.docker.com",
+        content: `#!/bin/bash
+# name: Docker Container Status
+# desc: Check if docker daemon is running, inspect CPU/memory stats, and list active containers.
+# tag: devops-tools, docker
+# url: https://hub.docker.com
+
+echo "=== Docker Container Status ==="
+if ! command -v docker >/dev/null 2>&1; then
+    echo "Error: docker command line tool is not installed."
+    exit 1
+fi
+echo "--- Docker System Info ---"
+docker info --format 'Containers: {{.Containers}}, Running: {{.ContainersRunning}}, Paused: {{.ContainersPaused}}, Stopped: {{.ContainersStopped}}' || echo "Error connecting to Docker Daemon."
+echo ""
+echo "--- Container Resource Stats ---"
+docker stats --no-stream --format "table {{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}\\t{{.NetIO}}" 2>/dev/null || echo "No running containers or stats unavailable."
+echo ""
+echo "--- All Containers ---"
+docker ps -a --format "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}"
+`
+    },
+    ssl_expiry: {
+        name: "SSL Expiry Checker",
+        category: "devops-tools",
+        filename: "ssl_expiry.sh",
+        url: "https://www.ssllabs.com/ssltest/",
+        content: `#!/bin/bash
+# name: SSL Expiry Checker
+# desc: Check and verify SSL/TLS certificate validity and expiration for any web host.
+# tag: devops-tools, ssl
+# url: https://www.ssllabs.com/ssltest/
+
+echo "=== SSL Expiry Checker ==="
+read -p "Enter domain (e.g. google.com): " domain
+if [ -z "$domain" ]; then
+    domain="google.com"
+fi
+echo "Connecting to $domain:443..."
+echo ""
+if ! command -v openssl >/dev/null 2>&1; then
+    echo "Error: openssl utility is not installed."
+    exit 1
+fi
+res=$(echo | openssl s_client -servername "$domain" -connect "$domain":443 2>/dev/null | openssl x509 -noout -dates -issuer)
+if [ -z "$res" ]; then
+    echo "Failed to retrieve SSL certificate details."
+else
+    echo "$res"
+fi
+`
+    },
+    git_diagnostics: {
+        name: "Git Repo Diagnostics",
+        category: "devops-tools",
+        filename: "git_diagnostics.sh",
+        url: "https://github.com",
+        content: `#!/bin/bash
+# name: Git Repo Diagnostics
+# desc: Run a detailed diagnostics audit on the local Git repository branches, statuses, and remotes.
+# tag: devops-tools, git
+# url: https://github.com
+
+echo "=== Git Repo Diagnostics ==="
+if ! command -v git >/dev/null 2>&1; then
+    echo "Error: git is not installed."
+    exit 1
+fi
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Error: Current directory is not a Git repository."
+    exit 1
+fi
+echo "Current Branch: $(git branch --show-current)"
+echo "Git Root: $(git rev-parse --show-toplevel)"
+echo ""
+echo "--- Git Status ---"
+git status -s
+echo ""
+echo "--- Recent Commits ---"
+git log -n 5 --oneline
+echo ""
+echo "--- Configured Remotes ---"
+git remote -v
+`
+    },
+    resource_alarm: {
+        name: "Resource Alarm Monitor",
+        category: "devops-tools",
+        filename: "resource_alarm.sh",
+        url: "https://grafana.com",
+        content: `#!/bin/bash
+# name: Resource Alarm Monitor
+# desc: Continuously monitor host disk and memory usage, triggering high usage console alerts.
+# tag: devops-tools, monitoring
+# url: https://grafana.com
+
+DISK_THRESHOLD=80
+MEM_THRESHOLD=85
+
+echo "=== Resource Alarm Monitor ==="
+echo "Disk Warning Limit: $DISK_THRESHOLD%"
+echo "Memory Warning Limit: $MEM_THRESHOLD%"
+echo ""
+
+# Disk Check
+disk_val=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+if [ "$disk_val" -gt "$DISK_THRESHOLD" ]; then
+    echo "⚠️ ALARM: Disk usage on root / is at \${disk_val}%!"
+else
+    echo "Disk usage is normal: \${disk_val}%"
+fi
+
+# Memory Check
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # MacOS memory approximation
+    free_pages=$(vm_stat | grep "Pages free" | awk '{print $3}' | sed 's/\\.//')
+    active_pages=$(vm_stat | grep "Pages active" | awk '{print $3}' | sed 's/\\.//')
+    spec_pages=$(vm_stat | grep "Pages speculative" | awk '{print $3}' | sed 's/\\.//')
+    wire_pages=$(vm_stat | grep "Pages wired" | awk '{print $3}' | sed 's/\\.//')
+    used_pages=$((active_pages + wire_pages + spec_pages))
+    total_pages=$((used_pages + free_pages))
+    mem_val=$((used_pages * 100 / total_pages))
+else
+    mem_val=$(free | grep Mem | awk '{print int($3/$2 * 100)}')
+fi
+
+if [ "$mem_val" -gt "$MEM_THRESHOLD" ]; then
+    echo "⚠️ ALARM: Memory usage is at \${mem_val}%!"
+else
+    echo "Memory usage is normal: \${mem_val}%"
+fi
+`
+    },
+    k8s_pods: {
+        name: "Kubernetes Pod Status",
+        category: "devops-tools",
+        filename: "k8s_pods.sh",
+        url: "https://kubernetes.io/docs/",
+        content: `#!/bin/bash
+# name: Kubernetes Pod Status
+# desc: Connect to configured cluster, check node connectivity, list pods across namespaces.
+# tag: devops-tools, kubernetes
+# url: https://kubernetes.io/docs/
+
+echo "=== Kubernetes Pod Status ==="
+if ! command -v kubectl >/dev/null 2>&1; then
+    echo "Error: kubectl command-line tool is not installed."
+    exit 1
+fi
+echo "--- Cluster Info ---"
+kubectl cluster-info || echo "Error connecting to Kubernetes Cluster."
+echo ""
+echo "--- Nodes Status ---"
+kubectl get nodes 2>/dev/null || echo "No nodes found or connection failed."
+echo ""
+echo "--- Pods (All Namespaces) ---"
+kubectl get pods --all-namespaces
+`
+    },
+    nginx_tester: {
+        name: "Nginx Config Integrity",
+        category: "devops-tools",
+        filename: "nginx_tester.sh",
+        url: "https://nginx.org/en/docs/",
+        content: `#!/bin/bash
+# name: Nginx Config Integrity
+# desc: Validate host Nginx configuration syntax and test responsiveness of localhost.
+# tag: devops-tools, nginx
+# url: https://nginx.org/en/docs/
+
+echo "=== Nginx Config Integrity ==="
+if ! command -v nginx >/dev/null 2>&1; then
+    echo "Error: nginx command is not installed or not in PATH."
+    exit 1
+fi
+echo "--- Testing Configuration Syntax ---"
+nginx -t 2>&1 || sudo nginx -t 2>&1
+echo ""
+echo "--- Nginx System Process Status ---"
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl status nginx --no-pager || echo "systemctl failed to get status."
+else
+    ps aux | grep nginx | grep -v grep
+fi
+`
+    }
+};
+
+async function loadPredefinedScript(key) {
+    const template = PREDEFINED_TOOLS[key];
+    if (!template) return;
+
+    try {
+        notify(`Linking ${template.name}...`, 'info');
+        const res = await fetch(API.save, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                category: template.category,
+                filename: template.filename,
+                content: template.content,
+                password: getUnlockPassword(`${template.category}/${template.filename}`)
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            await loadScripts();
+            await selectScript(data.path);
+            notify(`${template.name} has been linked and is ready to run!`, 'success');
+        } else {
+            notify(`Failed to link script: ${data.error || 'unknown error'}`, 'error');
+        }
+    } catch (err) {
+        console.error('Failed to link predefined script:', err);
+        notify(`Failed to link script: ${err.message}`, 'error');
+    }
+}
+}
